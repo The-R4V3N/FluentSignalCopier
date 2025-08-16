@@ -1,0 +1,16 @@
+# Core dependencies for Telegram functionality
+telethon>=1.35.0
+
+# GUI dependencies (for fluent_copier.py)
+PySide6>=6.6.0
+PySide6-Fluent-Widgets>=1.8.0
+
+# Environment configuration (for telegram_bridge.py)
+python-dotenv>=1.0.0
+
+# Build dependencies (optional - for creating executables)
+# pyinstaller>=6.0.0
+
+# Development/testing dependencies (optional)
+# pytest>=7.0.0
+# black>=23.0.0
