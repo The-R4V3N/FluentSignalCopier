@@ -160,7 +160,7 @@ MT5_FILES_DIR=C:\Users\You\AppData\Roaming\MetaQuotes\Terminal\...\MQL5\Files
 - **InpHeartbeatTimeout**: Seconds until EA considers the GUI stale  
 - **InpHeartbeatPopupAlerts**: Show MT5 popup alerts when stale (default: off)  
 - **InpHeartbeatPrintWarnings**: Print stale warnings to Experts tab (default: on)  
-- **InpHeartbeatWarnInterval**: Minimum seconds between repeated stale warnings 
+- **InpHeartbeatWarnInterval**: Minimum seconds between repeated stale warnings
 
 ## 🔧 Advanced Features
 
