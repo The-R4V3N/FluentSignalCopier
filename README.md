@@ -48,35 +48,35 @@ Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
 
 ### Installation
 
-1. **Install Python dependencies:**
+1. **Production (minimal):**
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-2. **Build GUI Application (Optional):**
+2. **Development (with build + testing tools):**
 
-## Install build dependencies
+    ```bash
+    pip install -r requirements-dev.txt
+    ```
 
-py -3.12 -m pip install pyside6 "PySide6-Fluent-Widgets>=1.8" telethon pyinstaller
+3. **Build GUI Application (Optional):**
 
-```bash
-py -3.12 -m PyInstaller --clean --noconsole --onefile ^
-    --name FluentSignalCopier ^
-    --icon .\app.ico ^
-    --add-data "app.ico;." ^
-    --collect-all qfluentwidgets --collect-all PySide6 ^
-    .\fluent_copier.py
-    - Get API ID and Hash from [my.telegram.org](https://my.telegram.org)
-    - Configure in `.env` or GUI
-```
+    ```bash
+    py -3.12 -m PyInstaller --clean --noconsole --onefile ^
+        --name FluentSignalCopier ^
+        --icon .\app.ico ^
+        --add-data "app.ico;." ^
+        --collect-all qfluentwidgets --collect-all PySide6 ^
+        .\fluent_copier.py
+    ```
 
-1. **Set up Telegram API:**
+4. **Set up Telegram API:**
 
     - Get API ID and Hash from my.telegram.org
     - Configure in .env or GUI
 
-2. **Install MT5 Expert Advisor:**
+5. **Install MT5 Expert Advisor:**
 
     - Copy FluentSignalCopier.mq5 to MQL5/Experts/
     - Compile in MetaEditor
@@ -84,13 +84,17 @@ py -3.12 -m PyInstaller --clean --noconsole --onefile ^
 
 ## Basic Usage
 
-### Option 1: GUI (Recommended)
+Option 1: GUI (Recommended)
+
+Run the FluentSignalCopier GUI to connect Telegram → MT5:
 
 ```bash
 python fluent_copier.py
 ```
 
-#### Option 2: Command Line
+Option 2: Command Line
+
+Run the bridge without GUI (headless mode):
 
 ```bash
 python telegram_bridge.py
