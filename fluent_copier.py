@@ -155,6 +155,45 @@ DOUBLE_RISK_RE = re.compile(r'\bDOUBLE\s*RISK\b', re.I)
 QUARTER_RISK_RE = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
 CLOSE_ANY_RE = re.compile(r'\b(close|close\s+all|close\s+at\s+market|close\s+now)\b', re.I)
 
+# --- TP move variations ---
+# Matches things like:
+#  - "Move TP4 to 3399", "TP4 moved to 3399", "TP 4 -> 3399", "TP4 now 3399"
+#  - "Original TP4 3382 Hit ... TP4 moved to 3399 for now"
+#  - "Set TP to 3399" (no index -> default to TP1)
+TP_MOVE_PATTERNS = [
+    # e.g., "Move TP4 to 3399", "Set TP3 to 1,234.5", "Raise TP2 -> 3401"
+    re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(\d{1,2})\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "TP4 moved to 3399", "TP 4 now 3399", "TP4 now at 3399"
+    re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "Original TP4 3382 Hit ... TP4 moved to 3399"
+    re.compile(r'\boriginal\s*tp\s*(\d{1,2})\b.*?\btp\s*\1\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I | re.S),
+    # e.g., "TP moved to 3399" (no index); default to TP1
+    re.compile(r'\btp\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "Move TP to 3399" (no index); default to TP1
+    re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+]
+
+def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
+    """Return list of {'slot': int, 'to': float} for any TP move variants found."""
+    out: List[Dict[str, Any]] = []
+    for pat in TP_MOVE_PATTERNS:
+        for m in pat.finditer(text):
+            # last numeric in the match is the price
+            price_str = m.group(m.lastindex)
+            to_val = _dec(price_str)
+            if to_val is None:
+                continue
+            # try index if present (first capturing group), else default to TP1
+            slot = 1
+            if m.lastindex and m.lastindex >= 1:
+                g1 = m.group(1)
+                # If this pattern's first group is actually the price (no index case), skip
+                if g1 and re.fullmatch(r'\d{1,2}', g1):
+                    slot = int(g1)
+            out.append({"slot": slot, "to": to_val})
+    return out
+
+
 def _dec(s: str) -> Optional[float]:
     try: return float(s.replace(",", "."))
     except: return None
@@ -184,6 +223,14 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         ms = SYM_RE.search(t)
         sym = normalize_symbol(ms.group(1)) if ms else ""
         return {"kind": "CLOSE", "symbol": sym}
+    
+    # ---- MODIFY_TP (move one or more TP slots to new price) ----
+    tp_moves = _find_tp_moves(t)
+    if tp_moves:
+        # Try to grab symbol from the same message; otherwise let handler fill from chat context
+        ms = SYM_RE.search(t)
+        sym = normalize_symbol(ms.group(1)) if ms else ""
+        return {"kind": "MODIFY_TP", "symbol": sym, "tp_moves": tp_moves}
 
     # ---- MODIFY ----
     if any(k in low for k in ["updated","update","edit","typo","correction"]):
@@ -587,6 +634,41 @@ class CopierThread(QThread):
                         with self.signal_file.open("a", encoding="utf-8") as f:
                             f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
                         self.logLine.emit(f"[WRITE] CLOSE {sym} (OID={oid})")
+                        _beep_ok()
+                        return
+                    
+                    # ===== MODIFY_TP =====
+                    if p["kind"] == "MODIFY_TP":
+                        sym = p.get("symbol") or self.recent_symbol_by_chat.get(source_key)
+                        if not sym:
+                            self.logLine.emit("[MODIFY_TP] No symbol context.")
+                            return
+
+                        moves = p.get("tp_moves") or []
+                        if not moves:
+                            self.logLine.emit("[MODIFY_TP] No moves parsed.")
+                            return
+
+                        for mv in moves:
+                            tp_slot = int(mv.get("slot") or 1)
+                            tp_to   = mv.get("to")
+                            gid = self._next_id()
+                            rec = {
+                                "action": "MODIFY_TP",
+                                "id": str(msg_id),
+                                "source_id": str(chat_id),
+                                "t": int(time.time()),
+                                "source": title,
+                                "symbol": sym,
+                                "tp_slot": tp_slot,
+                                "tp_to": tp_to,
+                                "gid": str(gid),
+                                "original_event_id": str(event.id),
+                                "confidence": conf
+                            }
+                            with self.signal_file.open("a", encoding="utf-8") as f:
+                                f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                            self.logLine.emit(f"[WRITE] MODIFY_TP {sym} TP{tp_slot} -> {tp_to}")
                         _beep_ok()
                         return
 

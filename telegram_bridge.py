@@ -149,6 +149,56 @@ TP_PATTERNS = [
     re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
+# --- TP move variations (very tolerant) ---
+# Handles:
+#  - "Move TP4 to 3399", "TP4 moved to 3399", "TP 4 -> 3399", "TP4 now 3399"
+#  - "Original TP4 3382 Hit ... TP4 moved to 3399 for now"
+#  - "TP moved to 3399", "Move TP to 3399"  (no index -> default TP1)
+TP_MOVE_PATTERNS = [
+    # e.g., "Move TP4 to 3399", "Set TP3 to 1,234.5", "Raise TP2 -> 3401"
+    re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(\d{1,2})\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "TP4 moved to 3399", "TP 4 now 3399", "TP4 now at 3399"
+    re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "Original TP4 3382 Hit ... TP4 moved to 3399"
+    re.compile(r'\boriginal\s*tp\s*(\d{1,2})\b.*?\btp\s*\1\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I | re.S),
+    # e.g., "TP moved to 3399" (no index); default to TP1
+    re.compile(r'\btp\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # e.g., "Move TP to 3399" (no index); default to TP1
+    re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+]
+
+def parse_tp_moves(text: str):
+    """
+    Return dict {'symbol': str|'' , 'moves': [{'slot': int, 'to': float}, ...]} if we see any TP move,
+    else None. If symbol not present in message, return '' so caller can fill from chat context.
+    """
+    t = text.strip()
+    moves = []
+    for pat in TP_MOVE_PATTERNS:
+        for m in pat.finditer(t):
+            # price is always the last capturing group in the pattern
+            price_str = m.group(m.lastindex)
+            to_val = convert_decimal(price_str)
+            if to_val is None:
+                continue
+
+            # If a TP index is present (group 1 is digits), use it; otherwise default to TP1
+            slot = 1
+            if m.lastindex >= 1:
+                g1 = m.group(1)
+                if g1 and re.fullmatch(r'\d{1,2}', g1):
+                    slot = int(g1)
+
+            moves.append({"slot": slot, "to": to_val})
+
+    if not moves:
+        return None
+
+    # try to detect a symbol in the same message; leave empty to fill from recent chat context
+    ms = SYM_RE.search(t)
+    sym = normalize_symbol(ms.group(1)) if ms else ""
+    return {"symbol": sym, "moves": moves}
+
 BE_HINT_RE = re.compile(r'\b(?:SL\s*entry\s*at\s*TP\s*1|(?:move|set)\s*SL\s*(?:to\s*)?entry\s*at\s*TP\s*1)\b', re.I)
 
 # Risk controls
@@ -441,6 +491,33 @@ async def main():
             with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=True) + "\n")
             print(f"[SAVED] CLOSE for {sym} from {title} (global_id={global_id})")
+            return
+        
+        # MODIFY_TP?  (move one or more TP slots)
+        tp_mod = parse_tp_moves(txt)
+        if tp_mod:
+            sym = tp_mod.get("symbol") or RECENT_SYMBOL_BY_CHAT.get(title)
+            if not sym:
+                print("[MODIFY_TP] No symbol found, skipping")
+                return
+
+            for mv in (tp_mod.get("moves") or []):
+                tp_slot = int(mv.get("slot") or 1)
+                tp_to   = mv.get("to")
+                global_id = get_next_id()
+                rec = {
+                    "action": "MODIFY_TP",
+                    "id": str(global_id),
+                    "t": int(time.time()),
+                    "source": title,
+                    "symbol": sym,
+                    "tp_slot": tp_slot,
+                    "tp_to": tp_to,
+                    "original_event_id": str(event.id)
+                }
+                with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=True) + "\n")
+                print(f"[SAVED] MODIFY_TP for {sym}: TP{tp_slot} -> {tp_to} (global_id={global_id})")
             return
 
         # MODIFY?
