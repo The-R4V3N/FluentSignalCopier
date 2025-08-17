@@ -134,6 +134,8 @@ HALF RISK
 
 #### Python Bridge (.env or GUI)
 
+Add your Credentials from my.telegram.org into the .env file:
+
 ```env
 TELEGRAM_API_ID=12345678
 TELEGRAM_API_HASH=your_hash_here
