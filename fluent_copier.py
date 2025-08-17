@@ -14,6 +14,18 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Iterable
 from html import escape
+import logging  # <-- NEW
+
+# --- NEW: centralized logging (your module) ---
+try:
+    from logging_config import setup_application_logging, create_logger, LogOperation
+except Exception:  # soft fallback if module missing
+    setup_application_logging = None
+    create_logger = None
+    class LogOperation:
+        def __init__(self, *_a, **_k): pass
+        def __enter__(self): return self
+        def __exit__(self, *_): pass
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QCoreApplication, QTimer
 from PySide6.QtGui import QTextCursor, QIcon
@@ -156,20 +168,11 @@ QUARTER_RISK_RE = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
 CLOSE_ANY_RE = re.compile(r'\b(close|close\s+all|close\s+at\s+market|close\s+now)\b', re.I)
 
 # --- TP move variations ---
-# Matches things like:
-#  - "Move TP4 to 3399", "TP4 moved to 3399", "TP 4 -> 3399", "TP4 now 3399"
-#  - "Original TP4 3382 Hit ... TP4 moved to 3399 for now"
-#  - "Set TP to 3399" (no index -> default to TP1)
 TP_MOVE_PATTERNS = [
-    # e.g., "Move TP4 to 3399", "Set TP3 to 1,234.5", "Raise TP2 -> 3401"
     re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(\d{1,2})\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    # e.g., "TP4 moved to 3399", "TP 4 now 3399", "TP4 now at 3399"
     re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    # e.g., "Original TP4 3382 Hit ... TP4 moved to 3399"
     re.compile(r'\boriginal\s*tp\s*(\d{1,2})\b.*?\btp\s*\1\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I | re.S),
-    # e.g., "TP moved to 3399" (no index); default to TP1
     re.compile(r'\btp\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    # e.g., "Move TP to 3399" (no index); default to TP1
     re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
@@ -178,21 +181,17 @@ def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     for pat in TP_MOVE_PATTERNS:
         for m in pat.finditer(text):
-            # last numeric in the match is the price
             price_str = m.group(m.lastindex)
             to_val = _dec(price_str)
             if to_val is None:
                 continue
-            # try index if present (first capturing group), else default to TP1
             slot = 1
             if m.lastindex and m.lastindex >= 1:
                 g1 = m.group(1)
-                # If this pattern's first group is actually the price (no index case), skip
                 if g1 and re.fullmatch(r'\d{1,2}', g1):
                     slot = int(g1)
             out.append({"slot": slot, "to": to_val})
     return out
-
 
 def _dec(s: str) -> Optional[float]:
     try: return float(s.replace(",", "."))
@@ -223,11 +222,10 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         ms = SYM_RE.search(t)
         sym = normalize_symbol(ms.group(1)) if ms else ""
         return {"kind": "CLOSE", "symbol": sym}
-    
-    # ---- MODIFY_TP (move one or more TP slots to new price) ----
+
+    # ---- MODIFY_TP ----
     tp_moves = _find_tp_moves(t)
     if tp_moves:
-        # Try to grab symbol from the same message; otherwise let handler fill from chat context
         ms = SYM_RE.search(t)
         sym = normalize_symbol(ms.group(1)) if ms else ""
         return {"kind": "MODIFY_TP", "symbol": sym, "tp_moves": tp_moves}
@@ -344,7 +342,7 @@ class CopierThread(QThread):
     runningState   = Signal(bool)
     dialogsReady   = Signal(list)
 
-    def __init__(self, cfg: AppConfig, parent=None):
+    def __init__(self, cfg: AppConfig, parent=None, logger=None):
         super().__init__(parent)
         self.cfg = cfg
         self.client: Optional[TelegramClient] = None
@@ -368,6 +366,46 @@ class CopierThread(QThread):
         # duplicate suppression
         self._recent_seen: Dict[str, float] = {}
 
+        # --- NEW: logging wiring
+        self._logger_core = logger or (create_logger("copier_thread") if create_logger else logging.getLogger("copier_thread"))
+        self.logger = getattr(self._logger_core, "logger", self._logger_core)
+
+    def _log_signal(self, action: str, symbol: str, source: str, meta: Optional[dict]=None, level="info"):
+        meta = meta or {}
+        try:
+            # your TradingLogger helper, if available
+            fn = getattr(self._logger_core, "log_signal", None)
+            if callable(fn):
+                fn(action, symbol, source, meta)
+                return
+        except Exception:
+            pass
+        # fallback to plain logger
+        msg = f"{action} {symbol} from {source}"
+        getattr(self.logger, level, self.logger.info)(msg + (f" | {meta}" if meta else ""))
+
+    def _log_connection(self, system: str, state: str, meta: Optional[dict]=None):
+        meta = meta or {}
+        try:
+            fn = getattr(self._logger_core, "log_connection", None)
+            if callable(fn):
+                fn(system, state, meta)
+                return
+        except Exception:
+            pass
+        self.logger.info(f"connection {system} {state} | {meta}")
+
+    def _log_heartbeat(self, who: str, state: str, meta: Optional[dict]=None):
+        meta = meta or {}
+        try:
+            fn = getattr(self._logger_core, "log_heartbeat", None)
+            if callable(fn):
+                fn(who, state, meta)
+                return
+        except Exception:
+            pass
+        self.logger.debug(f"heartbeat {who} {state} | {meta}")
+
     def set_quality_threshold(self, v:int):
         self.quality_threshold = max(0, min(100, int(v)))
 
@@ -384,12 +422,15 @@ class CopierThread(QThread):
             if self.counter_file.exists():
                 self.global_counter = int(self.counter_file.read_text().strip())
                 self.logLine.emit(f"[COUNTER] Loaded: {self.global_counter}")
+                self.logger.debug(f"counter_loaded {self.global_counter}")
             else:
                 self.global_counter = 0
                 self.logLine.emit("[COUNTER] Starting at 0")
+                self.logger.debug("counter_start 0")
         except Exception as e:
             self.global_counter = 0
             self.logLine.emit(f"[COUNTER] Load error: {e} -> 0")
+            self.logger.exception("counter_load_error", exc_info=e)
 
     def _next_id(self) -> int:
         self.global_counter += 1
@@ -397,6 +438,7 @@ class CopierThread(QThread):
             self.counter_file.write_text(str(self.global_counter))
         except Exception as e:
             self.logLine.emit(f"[COUNTER] Save error: {e}")
+            self.logger.exception("counter_save_error", exc_info=e)
         return self.global_counter
 
     # auth data from UI
@@ -418,6 +460,8 @@ class CopierThread(QThread):
             loop.run_until_complete(self._main(loop))
         except Exception as e:
             self.logLine.emit(f"[ERROR] {e}")
+            try: self.logger.exception("thread_crash", exc_info=e)
+            except: pass
         finally:
             self.runningState.emit(False)
 
@@ -435,6 +479,7 @@ class CopierThread(QThread):
             asyncio.run_coroutine_threadsafe(self._async_emit_dialogs(300), self._loop)
         except Exception as e:
             self.notify.emit("Fetch failed", str(e))
+            self.logger.exception("dialogs_fetch_error", exc_info=e)
 
     async def _async_emit_dialogs(self, limit: int = 1000):
         try:
@@ -448,8 +493,10 @@ class CopierThread(QThread):
                 out.append({"id": str(d.id), "title": title, "username": username})
             self._dialogs_cache = out
             self.dialogsReady.emit(out)
+            self.logger.info(f"dialogs_cached {len(out)}")
         except Exception as ex:
             self.notify.emit("Fetch failed", str(ex))
+            self.logger.exception("dialogs_fetch_exception", exc_info=ex)
 
     # confidence scoring for parsed signals
     def _confidence(self, p: dict) -> int:
@@ -492,12 +539,14 @@ class CopierThread(QThread):
 
         self.logLine.emit(f"[INFO] MT5 Files: {mt5_dir}")
         self.logLine.emit(f"[INFO] Writing: {self.signal_file}")
+        self.logger.info(f"paths mt5_dir={mt5_dir} signal_file={self.signal_file}")
 
         api_id  = int(self.cfg.api_id)
         api_hash= self.cfg.api_hash.strip()
         phone   = self.cfg.phone.strip()
         if not api_id or not api_hash:
             self.notify.emit("Missing credentials", "Enter API ID and API Hash.")
+            self.logger.error("missing_credentials")
             return
 
         session_path = str(APP_DIR / (self.cfg.session_name or "tg_bridge_session"))
@@ -511,9 +560,11 @@ class CopierThread(QThread):
                 if not await self.client.is_user_authorized():
                     if not phone:
                         self.notify.emit("Phone needed", "Enter your phone number for first login.")
+                        self.logger.warning("phone_needed_for_login")
                         return
                     result = await self.client.send_code_request(phone)
                     self.logLine.emit("[AUTH] Code sent.")
+                    self.logger.info("auth_code_sent")
                     self.authCodeNeeded.emit()
                     while self._code is None and not self._stop_flag:
                         await asyncio.sleep(0.1)
@@ -529,6 +580,7 @@ class CopierThread(QThread):
 
                 me = await self.client.get_me()
                 self.logLine.emit(f"[AUTH] Signed in as @{getattr(me,'username', None)} (id={me.id})")
+                self._log_connection("Telegram", "CONNECTED", {"user_id": getattr(me, "id", None)})
 
                 # Prefetch dialogs in background for instant picker
                 self.logLine.emit("[SCAN] Prefetching chats…")
@@ -551,8 +603,9 @@ class CopierThread(QThread):
                     # heartbeat touch (fast)
                     try:
                         self.heartbeat_file.write_text(str(int(time.time())), encoding="utf-8")
-                    except Exception:
-                        pass
+                        self._log_heartbeat("GUI", "alive", {"tick": int(time.time())})
+                    except Exception as e:
+                        self.logger.debug(f"heartbeat_write_fail {e!r}")
 
                     # de-dup
                     key = self._dedupe_key(chat_id, msg_id, event.raw_text or "")
@@ -598,135 +651,150 @@ class CopierThread(QThread):
 
                     txt = event.raw_text or ""
                     self.logLine.emit(f"[NEW] {title}: {repr(txt[:180])}...")
+                    self.logger.debug(f"new_message chat={title} id={msg_id}")
 
-                    p = parse_message(txt)
-                    if not p:
-                        self.logLine.emit("[PARSE] No valid signal.")
-                        return
-
-                    # confidence gate
-                    conf = self._confidence(p)
-                    threshold = self.quality_threshold  # numeric value, updated from MainWindow
-                    if conf < threshold:
-                        self.logLine.emit(f"[WARN] Signal skipped (confidence {conf} < {threshold})")
-                        return
-
-                    # ===== CLOSE =====
-                    if p["kind"] == "CLOSE":
-                        sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
-                        if not sym:
-                            self.logLine.emit("[CLOSE] No symbol context.")
-                            return
-                        oid = self.last_open_oid.get((source_key, sym), 0)
-                        gid = self._next_id()
-                        rec = {
-                            "action": "CLOSE",
-                            "id": str(msg_id),
-                            "source_id": str(chat_id),
-                            "t": int(time.time()),
-                            "source": title,
-                            "symbol": sym,
-                            "oid": str(oid),
-                            "gid": str(gid),
-                            "original_event_id": str(event.id),
-                            "confidence": conf
-                        }
-                        with self.signal_file.open("a", encoding="utf-8") as f:
-                            f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
-                        self.logLine.emit(f"[WRITE] CLOSE {sym} (OID={oid})")
-                        _beep_ok()
-                        return
-                    
-                    # ===== MODIFY_TP =====
-                    if p["kind"] == "MODIFY_TP":
-                        sym = p.get("symbol") or self.recent_symbol_by_chat.get(source_key)
-                        if not sym:
-                            self.logLine.emit("[MODIFY_TP] No symbol context.")
+                    # parse + confidence
+                    with LogOperation(getattr(self, "_logger_core", self.logger), "signal_processing",
+                                      chat=title, msg_id=str(msg_id)):
+                        p = parse_message(txt)
+                        if not p:
+                            self.logLine.emit("[PARSE] No valid signal.")
+                            self.logger.info("parse_none")
                             return
 
-                        moves = p.get("tp_moves") or []
-                        if not moves:
-                            self.logLine.emit("[MODIFY_TP] No moves parsed.")
+                        conf = self._confidence(p)
+                        threshold = self.quality_threshold
+                        if conf < threshold:
+                            self.logLine.emit(f"[WARN] Signal skipped (confidence {conf} < {threshold})")
+                            self.logger.info(f"signal_skipped_conf {conf}<{threshold}")
                             return
 
-                        for mv in moves:
-                            tp_slot = int(mv.get("slot") or 1)
-                            tp_to   = mv.get("to")
+                        # ===== CLOSE =====
+                        if p["kind"] == "CLOSE":
+                            sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
+                            if not sym:
+                                self.logLine.emit("[CLOSE] No symbol context.")
+                                self.logger.info("close_no_symbol_context")
+                                return
+                            oid = self.last_open_oid.get((source_key, sym), 0)
                             gid = self._next_id()
                             rec = {
-                                "action": "MODIFY_TP",
+                                "action": "CLOSE",
                                 "id": str(msg_id),
                                 "source_id": str(chat_id),
                                 "t": int(time.time()),
                                 "source": title,
                                 "symbol": sym,
-                                "tp_slot": tp_slot,
-                                "tp_to": tp_to,
+                                "oid": str(oid),
                                 "gid": str(gid),
                                 "original_event_id": str(event.id),
                                 "confidence": conf
                             }
                             with self.signal_file.open("a", encoding="utf-8") as f:
                                 f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
-                            self.logLine.emit(f"[WRITE] MODIFY_TP {sym} TP{tp_slot} -> {tp_to}")
-                        _beep_ok()
-                        return
-
-                    # ===== MODIFY =====
-                    if p["kind"] == "MODIFY":
-                        sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
-                        if not sym:
-                            self.logLine.emit("[MODIFY] No symbol context.")
+                            self.logLine.emit(f"[WRITE] CLOSE {sym} (OID={oid})")
+                            self._log_signal("CLOSE", sym, title, {"oid": oid, "conf": conf})
+                            _beep_ok()
                             return
+
+                        # ===== MODIFY_TP =====
+                        if p["kind"] == "MODIFY_TP":
+                            sym = p.get("symbol") or self.recent_symbol_by_chat.get(source_key)
+                            if not sym:
+                                self.logLine.emit("[MODIFY_TP] No symbol context.")
+                                self.logger.info("modify_tp_no_symbol_context")
+                                return
+
+                            moves = p.get("tp_moves") or []
+                            if not moves:
+                                self.logLine.emit("[MODIFY_TP] No moves parsed.")
+                                self.logger.info("modify_tp_no_moves")
+                                return
+
+                            for mv in moves:
+                                tp_slot = int(mv.get("slot") or 1)
+                                tp_to   = mv.get("to")
+                                gid = self._next_id()
+                                rec = {
+                                    "action": "MODIFY_TP",
+                                    "id": str(msg_id),
+                                    "source_id": str(chat_id),
+                                    "t": int(time.time()),
+                                    "source": title,
+                                    "symbol": sym,
+                                    "tp_slot": tp_slot,
+                                    "tp_to": tp_to,
+                                    "gid": str(gid),
+                                    "original_event_id": str(event.id),
+                                    "confidence": conf
+                                }
+                                with self.signal_file.open("a", encoding="utf-8") as f:
+                                    f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                                self.logLine.emit(f"[WRITE] MODIFY_TP {sym} TP{tp_slot} -> {tp_to}")
+                                self._log_signal("MODIFY_TP", sym, title, {"slot": tp_slot, "to": tp_to, "conf": conf})
+                            _beep_ok()
+                            return
+
+                        # ===== MODIFY =====
+                        if p["kind"] == "MODIFY":
+                            sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
+                            if not sym:
+                                self.logLine.emit("[MODIFY] No symbol context.")
+                                self.logger.info("modify_no_symbol_context")
+                                return
+                            gid = self._next_id()
+
+                            rec = {
+                                "action": "MODIFY",
+                                "id": str(msg_id),
+                                "source_id": str(chat_id),
+                                "t": int(time.time()),
+                                "source": title,
+                                "symbol": sym,
+                                "new_sl": p.get("new_sl"),
+                                "new_tps_csv": ",".join(str(x) for x in (p.get("new_tps") or [])) or "",
+                                "gid": str(gid),
+                                "original_event_id": str(event.id),
+                                "confidence": conf
+                            }
+                            with self.signal_file.open("a", encoding="utf-8") as f:
+                                f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                            self.logLine.emit(f"[WRITE] MODIFY {sym} SL->{p.get('new_sl')} TPs->{rec['new_tps_csv']}")
+                            self._log_signal("MODIFY", sym, title, {"new_sl": p.get("new_sl"),
+                                                                    "new_tps": p.get("new_tps"), "conf": conf})
+                            _beep_ok()
+                            return
+
+                        # ===== OPEN =====
+                        sym = p["symbol"]
+                        self.recent_symbol_by_chat[source_key] = sym
                         gid = self._next_id()
 
                         rec = {
-                            "action": "MODIFY",
+                            "action": "OPEN",
                             "id": str(msg_id),
                             "source_id": str(chat_id),
                             "t": int(time.time()),
                             "source": title,
-                            "symbol": sym,
-                            "new_sl": p.get("new_sl"),
-                            "new_tps_csv": ",".join(str(x) for x in (p.get("new_tps") or [])) or "",
+                            "raw": (txt.strip()[:1000]),
+                            "side": p["side"], "symbol": sym,
+                            "entry": p["entry"], "sl": p["sl"],
+                            "tp": None,
+                            "risk_percent": (1.0 if p["risk"] is None else p["risk"]),
+                            "lots": None,
+                            "tps_csv": ",".join(str(x) for x in (p["tps"] or [])) if p["tps"] else "",
+                            "be_on_tp": int(p["be_on_tp"] or 0),
                             "gid": str(gid),
                             "original_event_id": str(event.id),
                             "confidence": conf
                         }
                         with self.signal_file.open("a", encoding="utf-8") as f:
                             f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
-                        self.logLine.emit(f"[WRITE] MODIFY {sym} SL->{p.get('new_sl')} TPs->{rec['new_tps_csv']}")
+                        self.last_open_oid[(source_key, sym)] = msg_id
+                        self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p['sl']} TPs={rec['tps_csv']} (conf={conf})")
+                        self._log_signal("OPEN", sym, title, {"side": p["side"], "entry": p["entry"], "sl": p["sl"],
+                                                              "tps": p["tps"], "risk": rec["risk_percent"], "conf": conf})
                         _beep_ok()
-                        return
-
-                    # ===== OPEN =====
-                    sym = p["symbol"]
-                    self.recent_symbol_by_chat[source_key] = sym
-                    gid = self._next_id()
-
-                    rec = {
-                        "action": "OPEN",
-                        "id": str(msg_id),
-                        "source_id": str(chat_id),
-                        "t": int(time.time()),
-                        "source": title,
-                        "raw": (txt.strip()[:1000]),
-                        "side": p["side"], "symbol": sym,
-                        "entry": p["entry"], "sl": p["sl"],
-                        "tp": None,
-                        "risk_percent": (1.0 if p["risk"] is None else p["risk"]),
-                        "lots": None,
-                        "tps_csv": ",".join(str(x) for x in (p["tps"] or [])) if p["tps"] else "",
-                        "be_on_tp": int(p["be_on_tp"] or 0),
-                        "gid": str(gid),
-                        "original_event_id": str(event.id),
-                        "confidence": conf
-                    }
-                    with self.signal_file.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
-                    self.last_open_oid[(source_key, sym)] = msg_id
-                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p['sl']} TPs={rec['tps_csv']} (conf={conf})")
-                    _beep_ok()
 
                 @self.client.on(events.MessageEdited)
                 async def on_edit(event):
@@ -737,17 +805,21 @@ class CopierThread(QThread):
                     while not self._stop_flag and self.client and self.client.is_connected():
                         try:
                             self.heartbeat_file.write_text(str(int(time.time())), encoding="utf-8")
+                            self._log_heartbeat("GUI", "alive", {"tick": int(time.time())})
                         except Exception:
                             pass
                         await asyncio.sleep(5)
 
                 loop.create_task(_hb_writer())
                 self.logLine.emit("[RUN] Connected & listening…")
+                self.logger.info("client_connected_listening")
                 backoff = 1.0
                 await self.client.run_until_disconnected()
 
             except Exception as e:
                 self.logLine.emit(f"[ERROR] {e}")
+                try: self.logger.exception("client_loop_error", exc_info=e)
+                except: pass
                 _beep_warn()
             finally:
                 try:
@@ -755,10 +827,12 @@ class CopierThread(QThread):
                         await self.client.disconnect()
                 except Exception:
                     pass
+                self._log_connection("Telegram", "DISCONNECTED")
                 self.logLine.emit("[STOPPED]")
 
             if self._stop_flag: break
             self.logLine.emit(f"[WARN] Reconnecting in {int(backoff)}s…")
+            self.logger.warning(f"reconnecting_in {int(backoff)}s")
             await asyncio.sleep(backoff)
             backoff = min(60.0, backoff * 2.0)
 
@@ -772,9 +846,11 @@ class CopierThread(QThread):
                             await self.client.disconnect()
                     except Exception as e:
                         self.logLine.emit(f"[STOP] disconnect error: {e}")
+                        self.logger.exception("shutdown_disconnect_error", exc_info=e)
                 asyncio.run_coroutine_threadsafe(_shutdown(), self._loop)
         except Exception as e:
             self.logLine.emit(f"[STOP] scheduling error: {e}")
+            self.logger.exception("shutdown_schedule_error", exc_info=e)
 
     async def _prefetch_dialogs(self, limit: int = 400):
         try:
@@ -788,12 +864,48 @@ class CopierThread(QThread):
                 out.append({"id": str(d.id), "title": title, "username": username})
             self._dialogs_cache = out
             self.logLine.emit(f"[SCAN] Cached {len(out)} chats.")
+            self.logger.info(f"dialogs_prefetched {len(out)}")
         except Exception as ex:
             self.logLine.emit(f"[SCAN] Prefetch failed: {ex}")
+            self.logger.exception("dialogs_prefetch_error", exc_info=ex)
 
 # --------- Resource Path Helper ---------
 def resource_path(name):
     return Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / name
+
+# --------- UI log handler  ---------
+class QtUILogHandler(logging.Handler):
+    """Forward logs to GUI TextEdit, stripping ANSI colors and re-tagging."""
+    _ansi_re = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
+
+    def __init__(self, sink_fn):
+        super().__init__()
+        self.sink_fn = sink_fn
+
+    @staticmethod
+    def _strip_ansi(s: str) -> str:
+        return QtUILogHandler._ansi_re.sub("", s or "")
+
+    def emit(self, record: logging.LogRecord):
+        try:
+            # Build a clean message (avoid any colorized formatter output)
+            level = self._strip_ansi(record.levelname).upper()
+            name  = self._strip_ansi(record.name or "")
+            msg   = self._strip_ansi(record.getMessage())
+
+            # Optional: include module/exception info if present
+            if record.exc_info:
+                import traceback
+                msg += "\n" + self._strip_ansi(
+                    "".join(traceback.format_exception(*record.exc_info)).strip()
+                )
+
+            # Send to the GUI with our own tag (GUI renders [TAG] nicely)
+            line = f"[{level}] {name}: {msg}" if name else f"[{level}] {msg}"
+            self.sink_fn(line)
+        except Exception:
+            # Never let logging break the UI
+            pass
 
 # --------- UI ---------
 class MainWindow(QWidget):
@@ -921,6 +1033,17 @@ class MainWindow(QWidget):
         # small UI poller for future snapshot/heartbeat reads if needed
         self.uiTimer = QTimer(self); self.uiTimer.setInterval(2000); self.uiTimer.start()
         self.uiTimer.timeout.connect(self._tickUi)
+
+        # --- NEW: central logging init & mirror to UI
+        # We keep a standard logger handle in self.pylogger no matter what the setup returns.
+        self._log_core = setup_application_logging("copier_gui") if setup_application_logging else logging.getLogger("copier_gui")
+        self.pylogger = getattr(self._log_core, "logger", self._log_core)
+        ui_handler = QtUILogHandler(self._appendLog)
+        ui_handler.setLevel(logging.INFO)
+       # ui_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
+        self.pylogger.addHandler(ui_handler)
+        self.pylogger.proagate = True
+        self.pylogger.info("GUI ready")
 
     def _tickUi(self):  # reserved for future (e.g., snapshot rendering)
         pass
@@ -1050,15 +1173,20 @@ class MainWindow(QWidget):
             save_config(cfg)
             self.cfg = cfg
             self.toast("Saved", f"Config written to:\n{CONF_PATH}", success=True)
+            self.pylogger.info("config_saved")
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
+            self.pylogger.exception("config_save_error", exc_info=e)
 
     def start(self):
         self.saveConfig()
         if not self.cfg.api_id or not self.cfg.api_hash:
             QMessageBox.warning(self, "Missing", "Enter API ID and API Hash.")
+            self.pylogger.warning("start_blocked_missing_credentials")
             return
-        self.thread = CopierThread(self.cfg, self)
+        # Create thread with its own logger core
+        thread_logger = create_logger("copier_thread") if create_logger else logging.getLogger("copier_thread")
+        self.thread = CopierThread(self.cfg, self, logger=thread_logger)
         self.thread.logLine.connect(self._appendLog)
         self.thread.notify.connect(lambda t,m: self.toast(t, m))
         self.thread.authCodeNeeded.connect(self._onAuthCodeNeeded)
@@ -1069,12 +1197,14 @@ class MainWindow(QWidget):
         self.qualitySlider.valueChanged.connect(
             lambda v: self.thread and self.thread.set_quality_threshold(v)
         )
+        self.pylogger.info("starting_thread")
         self.thread.start()
         self._onRunningState(True)
 
     def stop(self):
         if self.thread:
             self.thread.stop()
+            self.pylogger.info("stop_requested")
         self._hideAuthBox()
         self._onRunningState(False)
 
@@ -1128,6 +1258,7 @@ class MainWindow(QWidget):
         self._appendLog(f"[RUN] Intake {now}")
         self.toast("Intake", now, success=True)
         self.pauseBtn.setText("Resume intake" if self.thread.is_paused() else "Pause intake")
+        self.pylogger.info(f"intake_{now.lower()}")
 
     def emergencyStop(self):
         if not self.thread or not self.thread.signal_file:
@@ -1145,6 +1276,15 @@ class MainWindow(QWidget):
             f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
         self._appendLog("[WRITE] EMERGENCY_CLOSE_ALL dispatched")
         self.toast("Emergency STOP", "Close-all signal sent.", success=True)
+        try:
+            core = getattr(self, "_log_core", self.pylogger)
+            fn = getattr(core, "log_signal", None)
+            if callable(fn):
+                fn("EMERGENCY_CLOSE_ALL", "", "GUI", {"confirm":"YES"})
+            else:
+                self.pylogger.warning("EMERGENCY_CLOSE_ALL dispatched")
+        except Exception:
+            self.pylogger.warning("EMERGENCY_CLOSE_ALL dispatched (no trade logger)")
 
 # --------- entry ---------
 def main():
