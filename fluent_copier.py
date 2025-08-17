@@ -1,7 +1,7 @@
 # fluent_copier.py
 # Modern Windows GUI (PySide6 + QFluentWidgets) for Telegram -> MT5 file-drop copier
 # Build (example):
-#   py -3.12 -m pip install pyside6 "PySide6-Fluent-Widgets>=1.8" telethon pyinstaller
+#   py -3.12 -m pip install pyside6 "PySide6-Fluent-Widgets>=1.8" telethon pyinstaller python-dotenv
 #   py -3.12 -m PyInstaller --clean --noconsole --onefile ^
 #       --name FluentSignalCopier ^
 #       --icon .\app.ico ^
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List, Iterable
 from html import escape
 
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QCoreApplication
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QCoreApplication, QTimer
 from PySide6.QtGui import QTextCursor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
@@ -29,12 +29,19 @@ from qfluentwidgets import (
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
 
+# optional sound beeps (Windows); safe no-ops elsewhere
+try:
+    import winsound
+    def _beep_ok():   winsound.MessageBeep(winsound.MB_ICONASTERISK)
+    def _beep_warn(): winsound.MessageBeep(winsound.MB_ICONHAND)
+except Exception:
+    def _beep_ok():   pass
+    def _beep_warn(): pass
 
 # --------- CONFIG ---------
 APP_DIR = Path(os.getenv("APPDATA", str(Path.home()))) / "R4V3N" / "Fluent_signals_copier"
 APP_DIR.mkdir(parents=True, exist_ok=True)
 CONF_PATH = APP_DIR / "config.json"
-
 
 @dataclass
 class AppConfig:
@@ -60,7 +67,6 @@ class AppConfig:
             session_name=d.get("session_name", "tg_bridge_session"),
         )
 
-
 def load_config() -> AppConfig:
     if CONF_PATH.exists():
         try:
@@ -69,10 +75,8 @@ def load_config() -> AppConfig:
             pass
     return AppConfig()
 
-
 def save_config(cfg: AppConfig):
     CONF_PATH.write_text(cfg.to_json(), encoding="utf-8")
-
 
 # --------- MT5 path auto-detect ---------
 def _uniq_paths(paths: Iterable[Path]) -> List[Path]:
@@ -85,7 +89,6 @@ def _uniq_paths(paths: Iterable[Path]) -> List[Path]:
         if rp not in seen and rp.exists():
             seen.add(rp); out.append(rp)
     return out
-
 
 def find_mt5_files_candidates() -> List[Path]:
     """Find likely MT5 MQL5\\Files directories, newest first."""
@@ -111,7 +114,6 @@ def find_mt5_files_candidates() -> List[Path]:
     except Exception:
         pass
     return cands
-
 
 # --------- PARSER (trimmed; same schema) ---------
 ALIASES = {
@@ -179,7 +181,6 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
 
     # ---- CLOSE ----
     if CLOSE_ANY_RE.search(t):
-        # Find a proper symbol anywhere; ignore generic words like NOW
         ms = SYM_RE.search(t)
         sym = normalize_symbol(ms.group(1)) if ms else ""
         return {"kind": "CLOSE", "symbol": sym}
@@ -227,7 +228,6 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     elif DOUBLE_RISK_RE.search(t): risk=2.0
     elif QUARTER_RISK_RE.search(t): risk=0.25
     return {"kind":"OPEN","side":side,"symbol":symbol,"entry":entry,"sl":sl,"tps":tps,"be_on_tp":be_on_tp,"risk":risk}
-
 
 # --------- Chat Picker Dialog ---------
 class ChatPickerDialog(QDialog):
@@ -288,7 +288,6 @@ class ChatPickerDialog(QDialog):
                 seen.add(s); uniq.append(s)
         return uniq
 
-
 # --------- Worker (QThread + asyncio) ---------
 class CopierThread(QThread):
     logLine = Signal(str)
@@ -303,6 +302,7 @@ class CopierThread(QThread):
         self.cfg = cfg
         self.client: Optional[TelegramClient] = None
         self._stop_flag = False
+        self._paused = False
         self._code: Optional[str] = None
         self._password: Optional[str] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -310,11 +310,15 @@ class CopierThread(QThread):
 
         self.signal_file: Optional[Path] = None
         self.counter_file: Optional[Path] = None
+        self.heartbeat_file: Optional[Path] = None
         self.global_counter = 0
 
-        # Per-chat memory keyed by a stable "source_key" (id:<chat_id> or name:<lower_title>)
+        # Per-chat memory keyed by stable "source_key" (id:<chat_id> or name:<lower_title>)
         self.recent_symbol_by_chat: Dict[str, str] = {}
-        self.last_open_oid: Dict[tuple, int] = {}   # key = (source_key, symbol) -> last OPEN id (Telegram message id)
+        self.last_open_oid: Dict[tuple, int] = {}   # (source_key, symbol) -> last OPEN id (Telegram message id)
+
+        # duplicate suppression
+        self._recent_seen: Dict[str, float] = {}
 
     # paths / counter
     def _choose_mt5_files(self) -> Path:
@@ -347,6 +351,10 @@ class CopierThread(QThread):
     # auth data from UI
     def set_auth_code(self, code: str): self._code = code
     def set_auth_password(self, pwd: str): self._password = pwd
+
+    # pause controls
+    def set_paused(self, v: bool): self._paused = bool(v)
+    def is_paused(self) -> bool: return self._paused
 
     # thread start
     def run(self):
@@ -392,6 +400,35 @@ class CopierThread(QThread):
         except Exception as ex:
             self.notify.emit("Fetch failed", str(ex))
 
+    # confidence scoring for parsed signals
+    def _confidence(self, p: dict) -> int:
+        if not p: return 0
+        score = 0
+        score += 40 if p.get("side") and p.get("symbol") else 0
+        if p.get("sl"): score += 20
+        tps = p.get("tps") or []
+        score += min(3, len(tps)) * 10          # up to +30
+        if isinstance(p.get("entry"), (int,float)): score += 5
+        if p.get("be_on_tp"): score += 5
+        return min(100, score)
+
+    def _dedupe_key(self, chat_id: int, msg_id: int, txt: str) -> str:
+        import hashlib
+        h = hashlib.sha1((txt.strip()[:400]).encode("utf-8", "ignore")).hexdigest()[:12]
+        return f"{chat_id}:{msg_id}:{h}"
+
+    def _dedupe_check(self, key: str, window=8.0) -> bool:
+        now = time.time()
+        # purge old
+        if self._recent_seen:
+            for k, exp in list(self._recent_seen.items()):
+                if exp < now:
+                    self._recent_seen.pop(k, None)
+        if key in self._recent_seen:
+            return True
+        self._recent_seen[key] = now + window
+        return False
+
     async def _main(self, loop):
         self.runningState.emit(True)
 
@@ -399,6 +436,7 @@ class CopierThread(QThread):
         mt5_dir.mkdir(parents=True, exist_ok=True)
         self.signal_file = mt5_dir / "Fluent_signals.jsonl"
         self.counter_file = mt5_dir / "signal_counter.txt"
+        self.heartbeat_file = mt5_dir / "fluent_heartbeat.txt"
         self._load_counter()
 
         self.logLine.emit(f"[INFO] MT5 Files: {mt5_dir}")
@@ -414,184 +452,229 @@ class CopierThread(QThread):
         session_path = str(APP_DIR / (self.cfg.session_name or "tg_bridge_session"))
         self.client = TelegramClient(session_path, api_id, api_hash)
 
-        try:
-            await self.client.connect()
-            if not await self.client.is_user_authorized():
-                if not phone:
-                    self.notify.emit("Phone needed", "Enter your phone number for first login.")
-                    return
-                result = await self.client.send_code_request(phone)
-                self.logLine.emit("[AUTH] Code sent.")
-                self.authCodeNeeded.emit()
-                while self._code is None and not self._stop_flag:
-                    await asyncio.sleep(0.1)
-                if self._stop_flag: return
-                try:
-                    await self.client.sign_in(phone=phone, code=self._code, phone_code_hash=result.phone_code_hash)
-                except SessionPasswordNeededError:
-                    self.authPwdNeeded.emit()
-                    while self._password is None and not self._stop_flag:
+        # reconnect loop with exponential backoff
+        backoff = 1.0
+        while not self._stop_flag:
+            try:
+                await self.client.connect()
+                if not await self.client.is_user_authorized():
+                    if not phone:
+                        self.notify.emit("Phone needed", "Enter your phone number for first login.")
+                        return
+                    result = await self.client.send_code_request(phone)
+                    self.logLine.emit("[AUTH] Code sent.")
+                    self.authCodeNeeded.emit()
+                    while self._code is None and not self._stop_flag:
                         await asyncio.sleep(0.1)
+                    if self._stop_flag: break
+                    try:
+                        await self.client.sign_in(phone=phone, code=self._code, phone_code_hash=result.phone_code_hash)
+                    except SessionPasswordNeededError:
+                        self.authPwdNeeded.emit()
+                        while self._password is None and not self._stop_flag:
+                            await asyncio.sleep(0.1)
+                        if self._stop_flag: break
+                        await self.client.sign_in(password=self._password)
+
+                me = await self.client.get_me()
+                self.logLine.emit(f"[AUTH] Signed in as @{getattr(me,'username', None)} (id={me.id})")
+
+                # Prefetch dialogs in background for instant picker
+                self.logLine.emit("[SCAN] Prefetching chats…")
+                self._loop.create_task(self._prefetch_dialogs())
+
+                watch = [w.strip() for w in (self.cfg.watch_chats or []) if str(w).strip()]
+                watch_set = {w.lower() for w in watch}
+                want_saved = any(x in ("me","saved messages","self") for x in watch_set)
+
+                @self.client.on(events.NewMessage)
+                async def on_new_message(event):
                     if self._stop_flag: return
-                    await self.client.sign_in(password=self._password)
+                    if self._paused:
+                        self.logLine.emit("[RUN] Intake paused; message ignored")
+                        return
 
-            me = await self.client.get_me()
-            self.logLine.emit(f"[AUTH] Signed in as @{getattr(me,'username', None)} (id={me.id})")
-            # Prefetch dialogs in background for instant picker
-            self.logLine.emit("[SCAN] Prefetching chats…")
-            self._loop.create_task(self._prefetch_dialogs())
+                    chat_id = event.chat_id
+                    msg_id  = event.id
 
-            watch = [w.strip() for w in (self.cfg.watch_chats or []) if str(w).strip()]
-            watch_set = {w.lower() for w in watch}
-            want_saved = any(x in ("me","saved messages","self") for x in watch_set)
+                    # heartbeat touch (fast)
+                    try:
+                        self.heartbeat_file.write_text(str(int(time.time())), encoding="utf-8")
+                    except Exception:
+                        pass
 
-            @self.client.on(events.NewMessage)
-            async def on_new_message(event):
-                if self._stop_flag:
-                    return
+                    # de-dup
+                    key = self._dedupe_key(chat_id, msg_id, event.raw_text or "")
+                    if self._dedupe_check(key):
+                        self.logLine.emit("[WARN] Duplicate/rapid replay suppressed")
+                        _beep_warn()
+                        return
 
-                chat_id = event.chat_id
-                msg_id  = event.id
+                    # Saved Messages?
+                    title = ""
+                    ok = False
+                    if event.is_private and want_saved:
+                        me2 = await self.client.get_me()
+                        if event.chat_id == me2.id:
+                            title = "Saved Messages"; ok = True
 
-                # Saved Messages
-                title = ""
-                ok = False
-                if event.is_private and want_saved:
-                    me2 = await self.client.get_me()
-                    if event.chat_id == me2.id:
-                        title = "Saved Messages"; ok = True
-
-                # Other chats
-                if not ok:
-                    chat = await event.get_chat()
-                    cands = set()
-                    title = getattr(chat, "title", None) or ""
-                    if title:
-                        cands.add(title.strip().lower())
-
-                    username = getattr(chat, "username", None)
-                    if username:
-                        u = username.strip()
-                        cands.add(u.lower()); cands.add(('@' + u).lower())
-
-                    cands.add(str(event.chat_id))  # numeric id
-
-                    first = getattr(chat, "first_name", None)
-                    last  = getattr(chat, "last_name", None)
-                    name_combo = " ".join(n for n in [first, last] if n)
-                    if name_combo:
-                        cands.add(name_combo.strip().lower())
-
-                    ok = bool(watch_set & cands)
+                    # Other chats
                     if not ok:
+                        chat = await event.get_chat()
+                        cands = set()
+                        title = getattr(chat, "title", None) or ""
+                        if title:
+                            cands.add(title.strip().lower())
+
+                        username = getattr(chat, "username", None)
+                        if username:
+                            u = username.strip()
+                            cands.add(u.lower()); cands.add(('@' + u).lower())
+
+                        cands.add(str(event.chat_id))  # numeric id
+
+                        first = getattr(chat, "first_name", None)
+                        last  = getattr(chat, "last_name", None)
+                        name_combo = " ".join(n for n in [first, last] if n)
+                        if name_combo:
+                            cands.add(name_combo.strip().lower())
+
+                        ok = bool(watch_set & cands)
+                        if not ok:
+                            return
+
+                    source_key = f"id:{chat_id}" if chat_id is not None else f"name:{(title or '').lower()}"
+
+                    txt = event.raw_text or ""
+                    self.logLine.emit(f"[NEW] {title}: {repr(txt[:180])}...")
+
+                    p = parse_message(txt)
+                    if not p:
+                        self.logLine.emit("[PARSE] No valid signal.")
                         return
 
-                # Build stable per-chat key (prefer id)
-                source_key = f"id:{chat_id}" if chat_id is not None else f"name:{(title or '').lower()}"
-
-                txt = event.raw_text or ""
-                self.logLine.emit(f"[NEW] {title}: {repr(txt[:180])}...")
-
-                p = parse_message(txt)
-                if not p:
-                    self.logLine.emit("[PARSE] No valid signal.")
-                    return
-
-                # ===== CLOSE =====
-                if p["kind"] == "CLOSE":
-                    sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
-                    if not sym:
-                        self.logLine.emit("[CLOSE] No symbol context.")
+                    # confidence gate
+                    conf = self._confidence(p)
+                    if conf < 50:
+                        self.logLine.emit(f"[WARN] Low-confidence signal ({conf}) skipped")
+                        _beep_warn()
                         return
-                    # Prefer the exact last OPEN id for this chat+symbol
-                    oid = self.last_open_oid.get((source_key, sym), 0)
-                    gid = self._next_id()  # optional debug id
 
-                    rec = {
-                        "action": "CLOSE",
-                        "id": str(msg_id),                 # native message id
-                        "source_id": str(chat_id),         # native chat id
-                        "t": int(time.time()),
-                        "source": title,
-                        "symbol": sym,
-                        "oid": str(oid),
-                        "gid": str(gid),                   # optional
-                        "original_event_id": str(event.id)
-                    }
-                    with self.signal_file.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps(rec, ensure_ascii=True) + "\n")
-                    self.logLine.emit(f"[WRITE] CLOSE {sym} (OID={oid})")
-                    return
-
-                # ===== MODIFY =====
-                if p["kind"] == "MODIFY":
-                    sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
-                    if not sym:
-                        self.logLine.emit("[MODIFY] No symbol context.")
+                    # ===== CLOSE =====
+                    if p["kind"] == "CLOSE":
+                        sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
+                        if not sym:
+                            self.logLine.emit("[CLOSE] No symbol context.")
+                            return
+                        oid = self.last_open_oid.get((source_key, sym), 0)
+                        gid = self._next_id()
+                        rec = {
+                            "action": "CLOSE",
+                            "id": str(msg_id),
+                            "source_id": str(chat_id),
+                            "t": int(time.time()),
+                            "source": title,
+                            "symbol": sym,
+                            "oid": str(oid),
+                            "gid": str(gid),
+                            "original_event_id": str(event.id),
+                            "confidence": conf
+                        }
+                        with self.signal_file.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                        self.logLine.emit(f"[WRITE] CLOSE {sym} (OID={oid})")
+                        _beep_ok()
                         return
+
+                    # ===== MODIFY =====
+                    if p["kind"] == "MODIFY":
+                        sym = p["symbol"] or self.recent_symbol_by_chat.get(source_key)
+                        if not sym:
+                            self.logLine.emit("[MODIFY] No symbol context.")
+                            return
+                        gid = self._next_id()
+
+                        rec = {
+                            "action": "MODIFY",
+                            "id": str(msg_id),
+                            "source_id": str(chat_id),
+                            "t": int(time.time()),
+                            "source": title,
+                            "symbol": sym,
+                            "new_sl": p.get("new_sl"),
+                            "new_tps_csv": ",".join(str(x) for x in (p.get("new_tps") or [])) or "",
+                            "gid": str(gid),
+                            "original_event_id": str(event.id),
+                            "confidence": conf
+                        }
+                        with self.signal_file.open("a", encoding="utf-8") as f:
+                            f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                        self.logLine.emit(f"[WRITE] MODIFY {sym} SL->{p.get('new_sl')} TPs->{rec['new_tps_csv']}")
+                        _beep_ok()
+                        return
+
+                    # ===== OPEN =====
+                    sym = p["symbol"]
+                    self.recent_symbol_by_chat[source_key] = sym
                     gid = self._next_id()
 
                     rec = {
-                        "action": "MODIFY",
+                        "action": "OPEN",
                         "id": str(msg_id),
                         "source_id": str(chat_id),
                         "t": int(time.time()),
                         "source": title,
-                        "symbol": sym,
-                        "new_sl": p.get("new_sl"),
-                        "new_tps_csv": ",".join(str(x) for x in (p.get("new_tps") or [])) or "",
+                        "raw": (txt.strip()[:1000]),
+                        "side": p["side"], "symbol": sym,
+                        "entry": p["entry"], "sl": p["sl"],
+                        "tp": None,
+                        "risk_percent": (1.0 if p["risk"] is None else p["risk"]),
+                        "lots": None,
+                        "tps_csv": ",".join(str(x) for x in (p["tps"] or [])) if p["tps"] else "",
+                        "be_on_tp": int(p["be_on_tp"] or 0),
                         "gid": str(gid),
-                        "original_event_id": str(event.id)
+                        "original_event_id": str(event.id),
+                        "confidence": conf
                     }
                     with self.signal_file.open("a", encoding="utf-8") as f:
-                        f.write(json.dumps(rec, ensure_ascii=True) + "\n")
-                    self.logLine.emit(f"[WRITE] MODIFY {sym} SL->{p.get('new_sl')} TPs->{rec['new_tps_csv']}")
-                    return
+                        f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+                    self.last_open_oid[(source_key, sym)] = msg_id
+                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p['sl']} TPs={rec['tps_csv']} (conf={conf})")
+                    _beep_ok()
 
-                # ===== OPEN =====
-                sym = p["symbol"]
-                self.recent_symbol_by_chat[source_key] = sym
-                gid = self._next_id()
+                @self.client.on(events.MessageEdited)
+                async def on_edit(event):
+                    await on_new_message(event)
 
-                rec = {
-                    "action": "OPEN",
-                    "id": str(msg_id),                 # native message id
-                    "source_id": str(chat_id),         # native chat id
-                    "t": int(time.time()),
-                    "source": title,
-                    "raw": (txt.strip()[:1000]),
-                    "side": p["side"], "symbol": sym,
-                    "entry": p["entry"], "sl": p["sl"],
-                    "tp": None,
-                    "risk_percent": (1.0 if p["risk"] is None else p["risk"]),
-                    "lots": None,
-                    "tps_csv": ",".join(str(x) for x in (p["tps"] or [])) if p["tps"] else "",
-                    "be_on_tp": int(p["be_on_tp"] or 0),
-                    "gid": str(gid),
-                    "original_event_id": str(event.id)
-                }
-                with self.signal_file.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=True) + "\n")
-                # Remember this OPEN id (Telegram message id) for future CLOSE filtering
-                self.last_open_oid[(source_key, sym)] = msg_id
-                self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p['sl']} TPs={rec['tps_csv']}")
+                # heartbeat pinger
+                async def _hb_writer():
+                    while not self._stop_flag and self.client and self.client.is_connected():
+                        try:
+                            self.heartbeat_file.write_text(str(int(time.time())), encoding="utf-8")
+                        except Exception:
+                            pass
+                        await asyncio.sleep(5)
 
-            @self.client.on(events.MessageEdited)
-            async def on_edit(event):
-                await on_new_message(event)
+                loop.create_task(_hb_writer())
+                self.logLine.emit("[RUN] Connected & listening…")
+                backoff = 1.0
+                await self.client.run_until_disconnected()
 
-            self.logLine.emit("[RUN] Listening…")
-            await self.client.run_until_disconnected()
+            except Exception as e:
+                self.logLine.emit(f"[ERROR] {e}")
+                _beep_warn()
+            finally:
+                try:
+                    if self.client and self.client.is_connected():
+                        await self.client.disconnect()
+                except Exception:
+                    pass
+                self.logLine.emit("[STOPPED]")
 
-        except Exception as e:
-            self.logLine.emit(f"[ERROR] {e}")
-        finally:
-            try:
-                if self.client and self.client.is_connected():
-                    await self.client.disconnect()
-            except Exception:
-                pass
-            self.logLine.emit("[STOPPED]")
+            if self._stop_flag: break
+            self.logLine.emit(f"[WARN] Reconnecting in {int(backoff)}s…")
+            await asyncio.sleep(backoff)
+            backoff = min(60.0, backoff * 2.0)
 
     def stop(self):
         self._stop_flag = True
@@ -622,11 +705,9 @@ class CopierThread(QThread):
         except Exception as ex:
             self.logLine.emit(f"[SCAN] Prefetch failed: {ex}")
 
-
 # --------- Resource Path Helper ---------
 def resource_path(name):
     return Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / name
-
 
 # --------- UI ---------
 class MainWindow(QWidget):
@@ -689,38 +770,44 @@ class MainWindow(QWidget):
 
         # Controls
         row3 = QHBoxLayout(); root.addLayout(row3)
-        self.saveBtn = PushButton(FluentIcon.SAVE, "Save", self)
+        self.saveBtn  = PushButton(FluentIcon.SAVE, "Save", self)
         self.startBtn = PrimaryPushButton("Start", self)
         self.stopBtn  = PushButton("Stop", self); self.stopBtn.setEnabled(False)
-        row3.addWidget(self.saveBtn); row3.addWidget(self.startBtn); row3.addWidget(self.stopBtn)
 
-        # Inline auth box (hidden until needed)
+        # NEW: Pause & Emergency
+        self.pauseBtn = PushButton(FluentIcon.PAUSE, "Pause intake", self); self.pauseBtn.setEnabled(False)
+        self.emergBtn = PrimaryPushButton("EMERGENCY STOP", self); self.emergBtn.setEnabled(False)
+
+        row3.addWidget(self.saveBtn); row3.addWidget(self.startBtn); row3.addWidget(self.stopBtn)
+        row3.addWidget(self.pauseBtn); row3.addWidget(self.emergBtn)
+
+        self.saveBtn.clicked.connect(self.saveConfig)
+        self.startBtn.clicked.connect(self.start)
+        self.stopBtn.clicked.connect(self.stop)
+        self.pauseBtn.clicked.connect(self.togglePause)
+        self.emergBtn.clicked.connect(self.emergencyStop)
+
+        # Inline auth box
         self.authBox = QWidget(self)
         authLay = QHBoxLayout(self.authBox)
-        authLay.setContentsMargins(0, 0, 0, 0)
-        authLay.setSpacing(8)
-
+        authLay.setContentsMargins(0, 0, 0, 0); authLay.setSpacing(8)
         self.authPrompt = SubtitleLabel("Enter the code you received:", self.authBox)
         self.authEdit   = LineEdit(self.authBox)
         self.authEdit.setPlaceholderText("e.g. 12345")
         self.authSubmit = PrimaryPushButton("Submit", self.authBox)
         self.authCancel = PushButton("Cancel", self.authBox)
-
         authLay.addWidget(self.authPrompt)
         authLay.addWidget(self.authEdit, 1)
         authLay.addWidget(self.authSubmit)
         authLay.addWidget(self.authCancel)
         self.authBox.setVisible(False)
-
-        root.addWidget(self.authBox)
-
-        # Auth box signals
         self.authSubmit.clicked.connect(self._submitAuth)
         self.authCancel.clicked.connect(self._cancelAuth)
+        root.addWidget(self.authBox)
 
         # Log
         root.addWidget(SubtitleLabel("Log"))
-        self.log = TextEdit(self); self.log.setReadOnly(True); 
+        self.log = TextEdit(self); self.log.setReadOnly(True)
         self.log.setMinimumHeight(220)
         self.log.setAcceptRichText(True)
         root.addWidget(self.log)
@@ -729,10 +816,12 @@ class MainWindow(QWidget):
         self.log.setContextMenuPolicy(Qt.CustomContextMenu)
         self.log.customContextMenuRequested.connect(self._showLogMenu)
 
-        # Signals
-        self.saveBtn.clicked.connect(self.saveConfig)
-        self.startBtn.clicked.connect(self.start)
-        self.stopBtn.clicked.connect(self.stop)
+        # small UI poller for future snapshot/heartbeat reads if needed
+        self.uiTimer = QTimer(self); self.uiTimer.setInterval(2000); self.uiTimer.start()
+        self.uiTimer.timeout.connect(self._tickUi)
+
+    def _tickUi(self):  # reserved for future (e.g., snapshot rendering)
+        pass
 
     # UI helpers
     def toast(self, title: str, content: str, success: bool = False):
@@ -744,7 +833,6 @@ class MainWindow(QWidget):
         Examples recognized: [ERROR], [WARN], [INFO], [NEW], [WRITE], [PARSE], [AUTH], [RUN], [SCAN], [STOPPED], [COUNTER]
         Falls back to [INFO] if no tag is present.
         """
-        # Map tags -> badge colors (light/dark friendly)
         colors = {
             "ERROR":   "#EF4444",  # red
             "WARN":    "#F59E0B",  # amber
@@ -758,48 +846,30 @@ class MainWindow(QWidget):
             "STOPPED": "#6B7280",  # gray
             "COUNTER": "#84CC16",  # lime
         }
+        aliases = { "WARNING": "WARN", "ERR": "ERROR" }
 
-        # Tag aliases so we don't need duplicate palette entries
-        aliases = {
-            "WARNING": "WARN",
-            "ERR": "ERROR",
-        }
-
-        tag = "INFO"
-        msg = line
-
+        tag = "INFO"; msg = line
         m = re.match(r'^\[([A-Za-z]+)]\s*(.*)$', line.strip())
         if m:
-            tag = m.group(1).upper()
-            tag = aliases.get(tag, tag)   # normalize alias
+            tag = aliases.get(m.group(1).upper(), m.group(1).upper())
             msg = m.group(2)
-
-        # Heuristics if no explicit [TAG]
-        if m is None:
+        else:
             low = line.lower()
-            if "error" in low:
-                tag = "ERROR"
-            elif "warn" in low:  # matches 'warn' and 'warning'
-                tag = "WARN"
+            if "error" in low: tag = "ERROR"
+            elif "warn" in low: tag = "WARN"
 
-        color = colors.get(tag, "#6B7280")  # default gray
+        color = colors.get(tag, "#6B7280")
         badge = (
             f'<span style="background-color:{color};'
             f' color:white; border-radius:8px; padding:1px 8px;'
             f' font-weight:600; font-family:Segoe UI, system-ui, -apple-system;">{escape(tag)}</span>'
         )
-
-        # Escape the message text; keep newlines as <br>
         safe_msg = escape(msg).replace("\n", "<br>")
-    
         html = f'<div style="margin:2px 0;">{badge}&nbsp;&nbsp;<span style="white-space:pre-wrap;">{safe_msg}</span></div>'
         self.log.append(html)
         self.log.moveCursor(QTextCursor.End)
 
     def _showAuthBox(self, mode: str):
-        """
-        mode: 'code' or 'password'
-        """
         if mode == "code":
             self.authPrompt.setText("Enter the code you received:")
             self.authEdit.setPlaceholderText("Telegram code (e.g. 12345)")
@@ -810,14 +880,9 @@ class MainWindow(QWidget):
             self.authEdit.setPlaceholderText("Password")
             self.authEdit.setEchoMode(self.authEdit.EchoMode.Password)
             self._authMode = "password"
+        self.authEdit.clear(); self.authBox.setVisible(True); self.authEdit.setFocus()
 
-        self.authEdit.clear()
-        self.authBox.setVisible(True)
-        self.authEdit.setFocus()
-
-    def _hideAuthBox(self):
-        self.authBox.setVisible(False)
-        self.authEdit.clear()
+    def _hideAuthBox(self): self.authBox.setVisible(False); self.authEdit.clear()
 
     def _submitAuth(self):
         text = self.authEdit.text().strip()
@@ -825,8 +890,7 @@ class MainWindow(QWidget):
             self.toast("Missing", "Please enter a value.")
             return
         if not self.thread:
-            self._hideAuthBox()
-            return
+            self._hideAuthBox(); return
         if getattr(self, "_authMode", "code") == "code":
             self.thread.set_auth_code(text)
             self.toast("Code sent", "Signing in…", success=True)
@@ -836,8 +900,7 @@ class MainWindow(QWidget):
         self._hideAuthBox()
 
     def _cancelAuth(self):
-        if self.thread:
-            self.thread.stop()
+        if self.thread: self.thread.stop()
         self._hideAuthBox()
 
     def _showLogMenu(self, pos):
@@ -849,7 +912,6 @@ class MainWindow(QWidget):
 
     def clearLog(self):
         self.log.clear()
-        # optional tiny toast:
         self.toast("Log cleared", "", success=True)
 
     # Actions
@@ -923,6 +985,8 @@ class MainWindow(QWidget):
         self.startBtn.setEnabled(not running)
         self.stopBtn.setEnabled(running)
         self.pickBtn.setEnabled(running)
+        self.pauseBtn.setEnabled(running)
+        self.emergBtn.setEnabled(running)
 
     def onPickChats(self):
         if not self.thread:
@@ -950,12 +1014,31 @@ class MainWindow(QWidget):
             self.chats.setText("\n".join(merged))
             self.toast("Added", f"Added {len(picks)} chat(s).", success=True)
 
+    # --- NEW: Pause + Emergency
+    def togglePause(self):
+        if not self.thread: return
+        self.thread.set_paused(not self.thread.is_paused())
+        now = "PAUSED" if self.thread.is_paused() else "RESUMED"
+        self._appendLog(f"[RUN] Intake {now}")
+        self.toast("Intake", now, success=True)
+        self.pauseBtn.setText("Resume intake" if self.thread.is_paused() else "Pause intake")
+
+    def emergencyStop(self):
+        if not self.thread or not self.thread.signal_file:
+            self.toast("Not running", "Start first")
+            return
+        rec = {"action":"EMERGENCY_CLOSE_ALL","t":int(time.time()),"source":"GUI","id":"0","source_id":""}
+        with self.thread.signal_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
+        self._appendLog("[WRITE] EMERGENCY_CLOSE_ALL dispatched")
+        self.toast("Emergency STOP", "Close-all signal sent.", success=True)
+        _beep_warn()
 
 # --------- entry ---------
 def main():
     app = QApplication(sys.argv)
     win = MainWindow()
-    win.resize(900, 680)
+    win.resize(980, 720)
     win.show()
     sys.exit(app.exec())
 
