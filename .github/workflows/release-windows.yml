@@ -1,77 +1,59 @@
-name: Build & Upload Windows EXE (on Release)
+name: Build Windows EXE on Release
 
 on:
   release:
-    types: [published]
+    types: [published]   # runs right after you press “Publish release”
 
 permissions:
-  contents: write   # required to upload files to the release
+  contents: write        # needed to attach assets to the release
 
 jobs:
-  build-windows:
+  build-windows-exe:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11 (required by qfluentwidgets)
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11" # use 3.11 for PySide6-Fluent-Widgets compatibility
+          python-version: "3.11"
+          cache: pip
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}-${{ hashFiles('requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        shell: bash
+      - name: Install deps
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install --upgrade pip wheel setuptools
           pip install -r requirements.txt
-          # Install pyinstaller here even if it's not in requirements.txt
           pip install pyinstaller
 
-      - name: Derive version from tag
-        id: ver
-        shell: bash
+      - name: Build GUI exe (FluentSignalCopier)
         run: |
-          # e.g. refs/tags/v0.9.1 -> 0.9.1
-          TAG="${GITHUB_REF##*/}"
-          echo "tag=${TAG#v}" >> $GITHUB_OUTPUT
+          pyinstaller --clean --noconsole --onefile `
+            --name FluentSignalCopier `
+            --icon app.ico `
+            --add-data "app.ico;." `
+            --collect-all qfluentwidgets --collect-all PySide6 `
+            fluent_copier.py
 
-      - name: Build EXE with PyInstaller
-        shell: bash
+      - name: (Optional) Build CLI exe (telegram_bridge)
         run: |
-          pyinstaller --clean --noconsole --onefile \
-            --name "FluentSignalCopier-${{ steps.ver.outputs.tag }}" \
-            --icon ./app.ico \
-            --add-data "app.ico;." \
-            --collect-all qfluentwidgets --collect-all PySide6 \
-            ./fluent_copier.py
+          pyinstaller --clean --onefile `
+            --name TelegramBridge `
+            telegram_bridge.py
 
-      - name: Verify build outputs
-        shell: bash
-        run: |
-          ls -la dist || dir dist
-
-      - name: Upload EXE as workflow artifact (optional)
+      - name: Upload artifacts (for CI browsing)
         uses: actions/upload-artifact@v4
         with:
-          name: FluentSignalCopier-${{ steps.ver.outputs.tag }}-win
+          name: windows-build-${{ github.ref_name }}
           path: |
-            dist/FluentSignalCopier-${{ steps.ver.outputs.tag }}.exe
+            dist/FluentSignalCopier.exe
+            dist/TelegramBridge.exe
 
-      - name: Upload EXE & EA to GitHub Release
+      - name: Attach EXEs to the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/FluentSignalCopier-${{ steps.ver.outputs.tag }}.exe
-            mt5/FluentSignalCopier.mq5
+            dist/FluentSignalCopier.exe
+            dist/TelegramBridge.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
