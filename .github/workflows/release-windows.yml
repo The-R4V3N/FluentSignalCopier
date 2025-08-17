@@ -2,10 +2,10 @@ name: Build Windows EXE on Release
 
 on:
   release:
-    types: [published]   # runs right after you press “Publish release”
+    types: [published]
 
 permissions:
-  contents: write        # needed to attach assets to the release
+  contents: write
 
 jobs:
   build-windows-exe:
@@ -14,11 +14,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11 (required by qfluentwidgets)
+      # Pin exact version to avoid 3.12 sneaking in
+      - name: Set up Python 3.11.9
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11.9"
           cache: pip
+
+      - name: Verify Python version
+        run: |
+          python --version
+          pip --version
+          where python
 
       - name: Install deps
         run: |
@@ -41,7 +48,7 @@ jobs:
             --name TelegramBridge `
             telegram_bridge.py
 
-      - name: Upload artifacts (for CI browsing)
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build-${{ github.ref_name }}
