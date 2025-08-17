@@ -307,6 +307,7 @@ class CopierThread(QThread):
         self._password: Optional[str] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._dialogs_cache: list = []
+        self.quality_threshold = 50
 
         self.signal_file: Optional[Path] = None
         self.counter_file: Optional[Path] = None
@@ -319,6 +320,9 @@ class CopierThread(QThread):
 
         # duplicate suppression
         self._recent_seen: Dict[str, float] = {}
+
+    def set_quality_threshold(self, v:int):
+        self.quality_threshold = max(0, min(100, int(v)))
 
     # paths / counter
     def _choose_mt5_files(self) -> Path:
@@ -555,7 +559,7 @@ class CopierThread(QThread):
 
                     # confidence gate
                     conf = self._confidence(p)
-                    threshold = self.qualitySlider.value() if self.qualitySlider else 50
+                    threshold = self.quality_threshold  # numeric value, updated from MainWindow
                     if conf < threshold:
                         self.logLine.emit(f"[WARN] Signal skipped (confidence {conf} < {threshold})")
                         return
@@ -979,6 +983,10 @@ class MainWindow(QWidget):
         self.thread.authPwdNeeded.connect(self._onAuthPwdNeeded)
         self.thread.runningState.connect(self._onRunningState)
         self.thread.dialogsReady.connect(self.onDialogsReady)
+        self.thread.set_quality_threshold(self.qualitySlider.value())
+        self.qualitySlider.valueChanged.connect(
+            lambda v: self.thread and self.thread.set_quality_threshold(v)
+        )
         self.thread.start()
         self._onRunningState(True)
 
@@ -1041,14 +1049,20 @@ class MainWindow(QWidget):
 
     def emergencyStop(self):
         if not self.thread or not self.thread.signal_file:
-            self.toast("Not running", "Start first")
-            return
-        rec = {"action":"EMERGENCY_CLOSE_ALL","t":int(time.time()),"source":"GUI","id":"0","source_id":""}
+            self.toast("Not running", "Start first"); return
+        gid = self.thread._next_id()  # use the same counter file
+        rec = {
+            "action":"EMERGENCY_CLOSE_ALL",
+            "id": str(gid),
+            "t": int(time.time()),
+            "source":"GUI",
+            "source_id":"",
+            "confirm":"YES"
+        }
         with self.thread.signal_file.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
         self._appendLog("[WRITE] EMERGENCY_CLOSE_ALL dispatched")
         self.toast("Emergency STOP", "Close-all signal sent.", success=True)
-        _beep_warn()
 
 # --------- entry ---------
 def main():
