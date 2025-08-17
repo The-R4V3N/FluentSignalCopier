@@ -2,20 +2,6 @@
 
 A production-ready bridge that reads trading signals from **Telegram** and executes them in **MetaTrader 5** via an Expert Advisor (EA).
 
- ⚡ **Changelog v0.9.0-beta (Production milestone):**
-
-- Added **MODIFY signal support** (mid-trade TP/SL edits)
-- Added **Emergency Close All** (Magic-scoped kill switch)
-- Safer sequencing with per-channel `last_id` (no missed/skipped trades)
-- Symbol handling split:  
-  • OPEN requires symbol visibility  
-  • CLOSE/MODIFY works even if symbol is hidden  
-- Added **confidence filter** (GUI slider) to auto-skip weak/incomplete signals  
-- Source-tagged trade comments (short 6-hex hash for traceability)  
-- Sound alerts for OPEN/CLOSE/EMERGENCY  
-- EA heartbeat + position snapshot JSON for GUI monitoring
-- Deduplication of OPEN signals across edits/noisy repeats  
-
 ---
 
 ## 🎯 Why This Project?
@@ -43,6 +29,7 @@ A production-ready bridge that reads trading signals from **Telegram** and execu
 - **Confidence gating**: GUI slider lets you auto-skip weak/incomplete signals.
 - **Sound alerts**: Optional pings on successful OPEN/CLOSE/EMERGENCY actions.
 - **Heartbeat + snapshots**: EA writes state/heartbeat to Files for the GUI → detect stale or disconnected bridge.
+- **Configurable heartbeat warnings**: Control if stale heartbeat triggers MT5 popup Alerts, Expert tab Prints, or both. Fully throttleable.
 
 ## 🏗️ Architecture
 
@@ -162,6 +149,14 @@ MT5_FILES_DIR=C:\Users\You\AppData\Roaming\MetaQuotes\Terminal\...\MQL5\Files
 - **SoundAlerts**: Play sounds on OPEN/CLOSE/EMERGENCY actions
 - **ConfidenceThreshold**: Skip signals below a given quality score
 - **SourceTagging**: Auto-tag trades with short hash of originating Telegram source
+
+#### Heartbeat & Alerts
+
+- **InpEnableHeartbeat**: Enable GUI heartbeat monitoring  
+- **InpHeartbeatTimeout**: Seconds until EA considers the GUI stale  
+- **InpHeartbeatPopupAlerts**: Show MT5 popup alerts when stale (default: off)  
+- **InpHeartbeatPrintWarnings**: Print stale warnings to Experts tab (default: on)  
+- **InpHeartbeatWarnInterval**: Minimum seconds between repeated stale warnings 
 
 ## 🔧 Advanced Features
 
