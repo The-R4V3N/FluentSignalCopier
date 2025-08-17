@@ -1,6 +1,25 @@
 <!-- markdownlint-disable MD024 -->
 # Changelog
 
+## [0.10.0] - 2025-08-17
+
+### Added
+
+- Centralized logging system (`setup_logging.py`, `logging_config.py`).
+- GUI log integration with color-tagged [INFO], [WARN], [ERROR] badges.
+- Real-time monitoring dashboard (`monitoring_dashboard.py`) to visualize logs.
+- Alert system (`alert_system.py`) for critical errors and notifications.
+
+### Changed
+
+- `fluent_copier.py` now integrates with the global logger.
+- Logs now stored with rotation and optional alerting.
+- Cleaner error handling, unified log format across modules.
+
+### Removed
+
+- Ad-hoc `print()` debugging → replaced with structured logs.
+
 ## [0.9.1-beta] - 2025-08-17
 
 ### 🚀 Added

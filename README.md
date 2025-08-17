@@ -1,4 +1,4 @@
-# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.9.1--beta-blue) ![Status](https://img.shields.io/badge/status-production--ready-green)
+# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.10.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green)
 
 A production-ready bridge that reads trading signals from **Telegram** and executes them in **MetaTrader 5** via an Expert Advisor (EA).
 
@@ -14,28 +14,38 @@ A production-ready bridge that reads trading signals from **Telegram** and execu
 - **Broker compatibility**: Symbol mapping (aliases like `US30 → DJ30`) and prefix/suffix support
 - **GUI and CLI**: User-friendly interface for configuration and monitoring, plus a command-line option for automation
 
-![FluentSignalCopier GUI](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/image.png)
+![FluentSignalCopier GUI](https://raw.githubusercontent.com/The-R4V3N/FluentSignalCopier/master/image.png)
 
 ## 🆕 Latest Features
 
-- **Modify signals supported**: Adjust stop-loss or move TPs mid-trade (e.g. *"Move TP4 to 3399"* or *"TP4 moved to 3399"*).
-- **Emergency Close**: One-click (or signal-based) close of all EA-managed positions, scoped by Magic.
-- **Safe sequencing**: Signals are tracked per channel/source with `last_id`; no more missed/skipped trades.
-- **Symbol robustness**:  
-  - OPEN requires symbol availability.  
-  - CLOSE/MODIFY will try best-effort even if symbol is not visible in Market Watch.
-- **Source-tagged comments**: Every trade comment includes a short unique tag → easy traceability across bridge ↔ EA.
-- **Deduplication**: Prevents double-opens on noisy or repeated Telegram edits.
-- **Confidence gating**: GUI slider lets you auto-skip weak/incomplete signals.
-- **Sound alerts**: Optional pings on successful OPEN/CLOSE/EMERGENCY actions.
-- **Heartbeat + snapshots**: EA writes state/heartbeat to Files for the GUI → detect stale or disconnected bridge.
-- **Configurable heartbeat warnings**: Control if stale heartbeat triggers MT5 popup Alerts, Expert tab Prints, or both. Fully throttleable.
+- **Centralized Logging**:
+  - Unified logging system across GUI, Telegram bridge, and MT5 connector.
+  - Structured log output with severity levels ([INFO], [WARN], [ERROR], [CRITICAL]).
+  - Logs displayed directly in GUI with color-tagged badges.
+  - Automatic log file rotation for production stability.
+
+- **Monitoring Dashboard**:
+  - Real-time visualization of logs and system activity.
+  - Health checks for bridge ↔ EA connectivity.
+  - Hooks for future performance metrics.
+
+- **Alert System**:
+  - Sends alerts on CRITICAL events (optional: future email/Slack/Discord hooks).
+  - Keeps you aware of failures even if GUI is minimized.
+
+- **Enhanced Production Readiness**:
+  - Replaced ad-hoc print() statements with structured logs.
+  - Clearer error handling with tracebacks in log files.
+  - Easier debugging and audit trails.
 
 ## 🏗️ Architecture
 
 ```yml
 Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
            (Parse & Filter)  (JSON)     (Execute)
+                 │
+                 ├── Logging → log files + GUI + dashboard
+                 └── Alerts  → notify on CRITICAL events
 ```
 
 ## 🚀 Quick Start
@@ -130,6 +140,17 @@ RISK 2%
 HALF RISK
 ```
 
+- **Logging & Alerts**
+  - Unified logging with rotating log files
+  - Real-time log streaming into GUI
+  - Severity levels with color-coded display
+  - Optional alerts on CRITICAL errors
+
+- **Monitoring Dashboard**:
+  - Web-based dashboard (monitoring_dashboard.py)
+  - Stream logs visually in charts/tables
+  - Detect stale connections instantly
+
 ### Configuration
 
 #### Python Bridge (.env or GUI)
@@ -189,11 +210,14 @@ MT5_FILES_DIR=C:\Users\You\AppData\Roaming\MetaQuotes\Terminal\...\MQL5\Files
 
 The system provides comprehensive logging:
 
-- **Python Bridge**: Real-time message parsing and filtering
-- **MT5 EA**: Trade execution and position management
+- **Python Bridge**: Real-time parsing + logs
+- **MT5 EA**: Trade execution logs
+- **GUI**: Embedded log view + confidence slider
+- **Monitoring Dashboard**: Central log stream with visualization
+- **Alert System**: CRITICAL alerts dispatched automatically
 - **Global Variables**: Per-channel state tracking
-- Heartbeat files: EA writes heartbeat + position snapshots for GUI health-checks
-- Signal quality filter: GUI slider skips incomplete or low-confidence signals automatically
+- **Heartbeat files**: EA writes heartbeat + position snapshots for GUI health-checks
+- **Signal quality filter**: GUI slider skips incomplete or low-confidence signals automatically
 
 ## ⚠️ Safety & Disclaimer
 
