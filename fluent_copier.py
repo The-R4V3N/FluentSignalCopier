@@ -19,7 +19,7 @@ from PySide6.QtCore import Qt, QThread, Signal, Slot, QCoreApplication, QTimer
 from PySide6.QtGui import QTextCursor, QIcon
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox,
-    QDialog, QListWidget, QListWidgetItem, QAbstractItemView
+    QDialog, QListWidget, QListWidgetItem, QAbstractItemView, QSlider, QLabel
 )
 from qfluentwidgets import (
     LineEdit, PushButton, PrimaryPushButton, TextEdit,
@@ -555,9 +555,9 @@ class CopierThread(QThread):
 
                     # confidence gate
                     conf = self._confidence(p)
-                    if conf < 50:
-                        self.logLine.emit(f"[WARN] Low-confidence signal ({conf}) skipped")
-                        _beep_warn()
+                    threshold = self.qualitySlider.value() if self.qualitySlider else 50
+                    if conf < threshold:
+                        self.logLine.emit(f"[WARN] Signal skipped (confidence {conf} < {threshold})")
                         return
 
                     # ===== CLOSE =====
@@ -786,6 +786,22 @@ class MainWindow(QWidget):
         self.stopBtn.clicked.connect(self.stop)
         self.pauseBtn.clicked.connect(self.togglePause)
         self.emergBtn.clicked.connect(self.emergencyStop)
+
+        # --- Signal quality slider
+        row4 = QHBoxLayout(); root.addLayout(row4)
+        self.qualityLabel = QLabel("Signal Quality ≥ 50", self)
+        self.qualitySlider = QSlider(Qt.Horizontal, self)
+        self.qualitySlider.setRange(0, 100)
+        self.qualitySlider.setValue(50)   # default
+        self.qualitySlider.setTickInterval(10)
+        self.qualitySlider.setTickPosition(QSlider.TicksBelow)
+
+        row4.addWidget(self.qualityLabel)
+        row4.addWidget(self.qualitySlider)
+
+        self.qualitySlider.valueChanged.connect(
+            lambda v: self.qualityLabel.setText(f"Signal Quality ≥ {v}")
+        )
 
         # Inline auth box
         self.authBox = QWidget(self)
