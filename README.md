@@ -14,7 +14,7 @@ A production-ready bridge that reads trading signals from **Telegram** and execu
 - **Broker compatibility**: Symbol mapping (aliases like `US30 → DJ30`) and prefix/suffix support
 - **GUI and CLI**: User-friendly interface for configuration and monitoring, plus a command-line option for automation
 
-![FluentSignalCopier GUI](https://raw.githubusercontent.com/The-R4V3N/FluentSignalCopier/master/image.png)
+![FluentSignalCopier GUI](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/image.png)
 
 ## 🆕 Latest Features
 
