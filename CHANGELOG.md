@@ -20,6 +20,10 @@
 
 - Ad-hoc `print()` debugging → replaced with structured logs.
 
+### Fixed
+
+- CLOSE and MODIFY signals no longer skipped by confidence threshold; slider now only applies to OPEN signals.
+
 ## [0.9.1-beta] - 2025-08-17
 
 ### 🚀 Added
