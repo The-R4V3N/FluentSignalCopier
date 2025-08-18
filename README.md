@@ -287,8 +287,7 @@ Supports additional actions:
 
 Contributions welcome! Please:
 
-- Test on demo accounts
-- Submit pull requests with clear descriptions
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on contributing, coding standards, and release process.
 
 ## 📜 License
 
