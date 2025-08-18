@@ -83,7 +83,7 @@ Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
 
 4. **Set up Telegram API:**
 
-    - Get API ID and Hash from my.telegram.org
+    - Get API ID and Hash ([from here](https://my.telegram.org))
     - Configure in .env or GUI
 
 5. **Install MT5 Expert Advisor:**
@@ -96,7 +96,7 @@ Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
 
 Option 1: GUI (Recommended)
 
-Run the FluentSignalCopier GUI to connect Telegram → MT5:
+- Run the FluentSignalCopier GUI to connect Telegram → MT5:
 
 ```bash
 python fluent_copier.py
@@ -104,7 +104,7 @@ python fluent_copier.py
 
 Option 2: Command Line
 
-Run the bridge without GUI (headless mode):
+- Run the bridge without GUI (headless mode):
 
 ```bash
 python telegram_bridge.py
@@ -153,9 +153,10 @@ HALF RISK
 
 ### Configuration
 
-#### Python Bridge (.env or GUI)
+#### Telegram Bridge (.env)
 
-Add your Credentials from my.telegram.org into the .env file:
+- Rename .env.example to .env.
+- Add your Credentials from my.telegram.org into the .env file:
 
 ```env
 TELEGRAM_API_ID=12345678
