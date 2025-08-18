@@ -218,3 +218,39 @@ MQL5/Tester/*
 
 # Log files
 logs/
+
+# js node modules
+node_modules/
+
+# Allow Husky’s helper script
+!.husky/_/husky.sh
+
+# --- Extra ignores for this repo ---
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Telethon session files (created when you auth)
+*.session
+*.session-journal
+
+# Local logs anywhere (you already ignore /logs, this catches stray *.log)
+*.log
+
+# Built binaries: don’t commit EXEs; releases should attach artifacts instead
+*.exe
+*.dll
+*.pdb
+
+# Husky/Commitlint tooling cache (keep hooks, ignore node_modules already)
+# (You SHOULD commit .husky/ and package*.json; just not node_modules/)
+# .husky/ is intentionally NOT ignored.
+
+# VSCode/JetBrains (optional—uncomment if you prefer to keep IDE settings local)
+#.vscode/
+#.idea/
+
+# Python version manager file (optional)
+#.python-version

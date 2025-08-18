@@ -1,0 +1,31 @@
+name: Commit Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches:
+      - master
+      - main
+      - develop
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # important to fetch full history for commitlint
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install commitlint
+        run: |
+          npm install --save-dev @commitlint/{config-conventional,cli}
+
+      - name: Run commitlint on commits
+        run: |
+          npx commitlint --from=origin/${{ github.event.repository.default_branch }} --to=HEAD

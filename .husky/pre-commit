@@ -1,0 +1,57 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+set -e
+
+# Only consider staged files
+PY_STAGED="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)"
+
+if [ -z "$PY_STAGED" ]; then
+  echo "pre-commit: no staged Python files. Skipping format/lint."
+  exit 0
+fi
+
+echo "pre-commit: checking/formatting Python files…"
+echo "$PY_STAGED" | tr ' ' '\n'
+
+# ----- Ruff (fast linter/fixes) -----
+if command -v ruff >/dev/null 2>&1; then
+  # quick autofix; if you prefer read-only, switch to `ruff check`
+  ruff check --fix $PY_STAGED
+  git add $PY_STAGED
+else
+  echo "ruff not found → skipping"
+fi
+
+# ----- isort (imports) -----
+if command -v isort >/dev/null 2>&1; then
+  isort --profile black $PY_STAGED
+  git add $PY_STAGED
+else
+  echo "isort not found → skipping"
+fi
+
+# ----- black (format) -----
+if command -v black >/dev/null 2>&1; then
+  # Use your project’s pyproject.toml if present
+  black $PY_STAGED
+  git add $PY_STAGED
+else
+  echo "black not found → skipping"
+fi
+
+# ----- flake8 (style/errors) -----
+if command -v flake8 >/dev/null 2>&1; then
+  flake8 $PY_STAGED
+else
+  echo "flake8 not found → skipping"
+fi
+
+# ----- mypy (type checks; optional) -----
+if command -v mypy >/dev/null 2>&1; then
+  mypy $PY_STAGED
+else
+  echo "mypy not found → skipping"
+fi
+
+echo "pre-commit: OK"

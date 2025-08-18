@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Enforce Conventional Commits via commitlint
+# Requires devDeps: @commitlint/cli @commitlint/config-conventional
+npx --yes commitlint --edit "$1"

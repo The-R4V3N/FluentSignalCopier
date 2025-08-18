@@ -1,0 +1,32 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+set -e
+
+echo "pre-push: running quick quality gate…"
+
+# Run unit tests if available
+if command -v pytest >/dev/null 2>&1; then
+  echo "→ pytest"
+  pytest -q
+else
+  echo "pytest not found → skipping tests"
+fi
+
+# Optional: static type checks on the repo (fast, skip if not installed)
+if command -v mypy >/dev/null 2>&1; then
+  echo "→ mypy (repository)"
+  mypy .
+else
+  echo "mypy not found → skipping type checks"
+fi
+
+# Optional: ultra-fast project-wide lint (skip if ruff not installed)
+if command -v ruff >/dev/null 2>&1; then
+  echo "→ ruff (repository)"
+  ruff check .
+else
+  echo "ruff not found → skipping repo lint"
+fi
+
+echo "pre-push: OK"
