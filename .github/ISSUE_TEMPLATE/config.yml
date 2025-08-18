@@ -1,0 +1,9 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 Ask a Question
+    url: https://github.com/The-R4V3N/FluentSignalCopier/discussions
+    about: Use GitHub Discussions for general questions, setup help, or sharing ideas.
+  - name: 📖 Contributing Guidelines
+    url: https://github.com/The-R4V3N/FluentSignalCopier/blob/master/CONTRIBUTING.md
+    about: Please read our contribution guidelines before opening an issue or PR.

@@ -1,0 +1,57 @@
+# Label PRs based on changed files and/or title keywords
+
+"area: gui":
+  - changed-files:
+      - any-glob-to-any-file: ["fluent_copier.py", "monitoring_dashboard.py", "app.ico"]
+  - head-branch:
+      - "/.*gui.*/i"
+  - title:
+      - "/gui/i"
+
+"area: parser":
+  - changed-files:
+      - any-glob-to-any-file: ["telegram_bridge.py", "**/parser*.py"]
+  - title:
+      - "/parse|parser|signal/i"
+
+"area: EA":
+  - changed-files:
+      - any-glob-to-any-file: ["mt5/**.mq5", "mt5/**.mqh"]
+  - title:
+      - "/EA|Expert|MQL5|MT5/i"
+
+"area: logging":
+  - changed-files:
+      - any-glob-to-any-file: ["setup_logging.py", "logging_config.py", "alert_system.py"]
+  - title:
+      - "/log|logging|alert/i"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file: ["README.md", "CHANGELOG.md", "CONTRIBUTING.md", ".github/*.md"]
+  - title:
+      - "/docs|readme|changelog|contributing/i"
+
+"area: ci":
+  - changed-files:
+      - any-glob-to-any-file: [".github/workflows/**", ".github/labeler.yml"]
+  - title:
+      - "/ci|pipeline|workflow|github actions/i"
+
+"type: feature":
+  - title:
+      - "/^feat(?:ure)?:/i"
+      - "/add|introduce|implement/i"
+
+"type: bug":
+  - title:
+      - "/^fix:/i"
+      - "/bug|hotfix|patch/i"
+
+"type: breaking":
+  - title:
+      - "/breaking|BREAKING CHANGE/i"
+
+"prio: high":
+  - title:
+      - "/emergency|urgent|critical/i"
