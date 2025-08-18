@@ -165,7 +165,10 @@ RISK_PCT_RE = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
 HALF_RISK_RE = re.compile(r'\bHALF\s*RISK\b', re.I)
 DOUBLE_RISK_RE = re.compile(r'\bDOUBLE\s*RISK\b', re.I)
 QUARTER_RISK_RE = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
-CLOSE_ANY_RE = re.compile(r'\b(close|close\s+all|close\s+at\s+market|close\s+now)\b', re.I)
+CLOSE_ANY_RE = re.compile(
+    r'\b(close|close\s+all|close\s+at\s+market|close\s+now|flatten|exit\s+now|liquidate)\b',
+    re.I
+)
 
 # --- TP move variations ---
 TP_MOVE_PATTERNS = [
@@ -500,13 +503,20 @@ class CopierThread(QThread):
 
     # confidence scoring for parsed signals
     def _confidence(self, p: dict) -> int:
-        if not p: return 0
+        if not p:
+            return 0
+        k = p.get("kind")
+        if k == "CLOSE":
+            return 100
+        if k in ("MODIFY_TP", "MODIFY"):
+            return 90
+        # OPEN only (existing heuristic)
         score = 0
         score += 40 if p.get("side") and p.get("symbol") else 0
         if p.get("sl"): score += 20
         tps = p.get("tps") or []
-        score += min(3, len(tps)) * 10          # up to +30
-        if isinstance(p.get("entry"), (int,float)): score += 5
+        score += min(3, len(tps)) * 10
+        if isinstance(p.get("entry"), (int, float)): score += 5
         if p.get("be_on_tp"): score += 5
         return min(100, score)
 
@@ -664,9 +674,10 @@ class CopierThread(QThread):
 
                         conf = self._confidence(p)
                         threshold = self.quality_threshold
-                        if conf < threshold:
+
+                        # Only gate OPEN by the threshold; let CLOSE/MODIFY through.
+                        if p.get("kind") == "OPEN" and conf < threshold:
                             self.logLine.emit(f"[WARN] Signal skipped (confidence {conf} < {threshold})")
-                            self.logger.info(f"signal_skipped_conf {conf}<{threshold}")
                             return
 
                         # ===== CLOSE =====
