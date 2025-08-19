@@ -23,6 +23,7 @@
 ### Fixed
 
 - CLOSE and MODIFY signals no longer skipped by confidence threshold; slider now only applies to OPEN signals.
+- **Break-even logic**: ensured that when "SL to entry at TP1" triggers, *all remaining TP-linked positions under the same OID* have their SL moved to entry, instead of only the first.
 
 ## [0.9.1-beta] - 2025-08-17
 
