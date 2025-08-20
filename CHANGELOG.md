@@ -13,7 +13,7 @@
 ### 📚 Docs / Dev (no functional change)
 
 - Switched installation & usage docs to **Poetry-only workflow**:
-  - Removed `requirements.txt` references.
+  - Removed legacy `requirements.txt`, `requirements-dev.txt`, and `requirements-logging.txt` in favor of Poetry (`pyproject.toml`).
   - Added `poetry env use` and `poetry install --no-root` instructions.
   - Updated usage examples to `poetry run python …`.
 - Cleaned up README:
