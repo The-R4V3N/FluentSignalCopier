@@ -1,0 +1,34 @@
+# pyproject.toml (scripts layout)
+[tool.poetry]
+name = "fluentsignalcopier"
+version = "0.10.0"
+description = "Telegram -> MT5 signal bridge with GUI (PySide6) and EA integration."
+authors = ["Oliver <you@example.com>"]
+license = "MIT"
+readme = "README.md"
+# No packages section: we’re not packaging a library module
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+telethon = ">=1.35.0"
+PySide6 = ">=6.6.0"
+PySide6-Fluent-Widgets = ">=1.8.0"
+python-dotenv = ">=1.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+black = ">=23.0.0"
+flake8 = ">=6.0.0"
+mypy = ">=1.6.0"
+pyinstaller = ">=6.0.0"
+commitizen = ">=3.20.0"
+
+
+[tool.poetry.scripts]
+fluent-gui = "fluent_copier:main"         # file `fluent_copier.py` at repo root
+telegram-bridge = "telegram_bridge:main"  # file `telegram_bridge.py` at repo root
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

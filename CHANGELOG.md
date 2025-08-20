@@ -10,6 +10,20 @@
 - Real-time monitoring dashboard (`monitoring_dashboard.py`) to visualize logs.
 - Alert system (`alert_system.py`) for critical errors and notifications.
 
+### 📚 Docs / Dev (no functional change)
+
+- Switched installation & usage docs to **Poetry-only workflow**:
+  - Removed `requirements.txt` references.
+  - Added `poetry env use` and `poetry install --no-root` instructions.
+  - Updated usage examples to `poetry run python …`.
+- Cleaned up README:
+  - Fixed code block formatting and numbering.
+  - Merged duplicate Troubleshooting sections.
+  - Moved disclaimer higher up for visibility.
+  - Updated file structure to show `pyproject.toml` instead of `requirements.txt`.
+
+---
+
 ### Changed
 
 - `fluent_copier.py` now integrates with the global logger.

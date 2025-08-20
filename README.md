@@ -52,39 +52,37 @@ Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
 
 ### Prerequisites
 
-- Python 3.11+
+- **Python 3.11 or 3.12** (PySide6 does not yet support 3.13+)
+- [Poetry](https://python-poetry.org/) for dependency management
 - MetaTrader 5
 - Telegram API credentials ([get them here](https://my.telegram.org))
 
-### Installation
+### Installation (Development)
 
-1. **Production (minimal):**
+1. **Install Poetry** (on Windows recommended via [pipx](https://pypa.github.io/pipx/)):
 
-    ```bash
-    pip install -r requirements.txt
+   ```powershell
+   pipx install poetry
     ```
 
-2. **Development (with build + testing tools):**
+2. **Clone the repo and enter the folder:**
 
-    ```bash
-    pip install -r requirements-dev.txt
+    ```powershell
+    git clone https://github.com/The-R4V3N/FluentSignalCopier.git
+    cd FluentSignalCopier
     ```
 
-3. **Build GUI Application (Optional):**
+3. **Create a Poetry venv with Python 3.11:**
 
-    ```bash
-    py -3.12 -m PyInstaller --clean --noconsole --onefile ^
-        --name FluentSignalCopier ^
-        --icon .\app.ico ^
-        --add-data "app.ico;." ^
-        --collect-all qfluentwidgets --collect-all PySide6 ^
-        .\fluent_copier.py
+    ```powershell
+    poetry env use C:\Users\<you>\AppData\Local\Programs\Python\Python311\python.exe
     ```
 
-4. **Set up Telegram API:**
+4. **Install dependencies (script mode)::**
 
-    - Get API ID and Hash ([from here](https://my.telegram.org))
-    - Configure in .env or GUI
+  ```powershell
+    poetry install --no-root
+  ```
 
 5. **Install MT5 Expert Advisor:**
 
@@ -92,23 +90,35 @@ Telegram → Python Bridge → MT5 Files → Expert Advisor → Trades
     - Compile in MetaEditor
     - Attach to any chart with AutoTrading enabled
 
-## Basic Usage
+## ▶️ Running
 
 Option 1: GUI (Recommended)
 
 - Run the FluentSignalCopier GUI to connect Telegram → MT5:
 
-```bash
-python fluent_copier.py
+``` powershell
+    poetry run python fluent_copier.py
 ```
 
-Option 2: Command Line
+Option 2: Command-line Bridge (Headless)
 
-- Run the bridge without GUI (headless mode):
-
-```bash
-python telegram_bridge.py
+``` powershell
+    poetry run python telegram_bridge.py
 ```
+
+Both commands run inside the Poetry-managed virtual environment.
+
+## 🛠️ Troubleshooting
+
+| Issue      | Solution                                                                 |
+|------------|--------------------------------------------------------------------------|
+| No file/folder found for package fluentsignalcopier | Use poetry install --no-root in script mode |
+| Poetry picks Python 3.13 | Force Python 3.11 with poetry env use <path-to-python311.exe> |
+| PySide6 install fails | You’re likely on Python 3.13+ — downgrade to 3.11/3.12 |
+| No trades placed | Check MT5 EA is attached, AutoTrading enabled, and symbols match |
+| Symbol not found | Ensure the symbol is available in MT5 and matches the Telegram signal. Also add to Market Watch, check prefix/suffix |
+| Multiple opens for one message | Enable deduplication in the GUI settings |
+| Wrong trades closed | Verify close-by-OID is enabled in the GUI settings |
 
 ## 📋 Features
 
@@ -219,36 +229,17 @@ The system provides comprehensive logging:
 - **Global Variables**: Per-channel state tracking
 - **Heartbeat files**: EA writes heartbeat + position snapshots for GUI health-checks
 - **Signal quality filter**: GUI slider skips incomplete or low-confidence signals automatically
-
-## ⚠️ Safety & Disclaimer
-
-**This system places real trades.**
-
-- Test on demo accounts first
-- You are responsible for risk management
-- No warranty provided
-- Ensure compliance with your broker's policies
-
-## 🛠️ Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| FileOpen failed | Check MT5 file path and permissions |
-| No trades placed | Enable AutoTrading, check symbol names |
-| Symbol not found | Add to Market Watch, check prefix/suffix |
-| Multiple opens for one message | Enable deduplication |
-| Wrong trades closed | Verify close-by-OID is enabled |
-
+  
 ## 🔄 File Structure
 
 ``` yml
 FluentSignalCopier/
-├── telegram_bridge.py      # Command-line bridge
-├── fluent_copier.py        # GUI application  
-├── requirements.txt        # Python dependencies
+├── telegram_bridge.py          # Command-line bridge
+├── fluent_copier.py            # GUI application  
+├── pyproject.toml              # Poetry config
 ├── mt5/
 │   └── FluentSignalCopier.mq5  # Expert Advisor
-└── README.md
+└── README.md                   # Project documentation
 ```
 
 ## 📄 JSON Schema
@@ -304,6 +295,15 @@ We take security seriously and will respond promptly.
 
 This project follows a [Code of Conduct](CODE_OF_CONDUCT.md) to ensure a welcoming community.
 By participating, you are expected to uphold this standard.
+
+## ⚠️ Safety & Disclaimer
+
+**This system places real trades.**
+
+- Test on demo accounts first
+- You are responsible for risk management
+- No warranty provided
+- Ensure compliance with your broker's policies
 
 ## 📜 License
 
