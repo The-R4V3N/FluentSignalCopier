@@ -1,6 +1,5 @@
 # telegram_bridge.py — Telegram → MT5 bridge (robust parser + global counter)
 # Python 3.11+.  pip install telethon python-dotenv
-
 import asyncio, json, time, re, os, sys
 from pathlib import Path
 from telethon import TelegramClient, events
