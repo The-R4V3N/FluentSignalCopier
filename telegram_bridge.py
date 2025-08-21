@@ -172,9 +172,12 @@ SL_PATTERNS = [
     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 TP_PATTERNS = [
-    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'\bTP\d*\s+(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # "TP @ 3349", "TP@3349"
+    re.compile(r'\bTP\d*\s*@\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # "TP1 3349", "TP 3349", "TP1 = 3349", "TP1 -> 3349"
+    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # line starts with TP… followed by a price
+    re.compile(r'^\s*TP\d*\s*@?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
 ]
 
 # Very tolerant whole-text SL fallback (handles NBSP / commas)
@@ -191,7 +194,10 @@ QUARTER_RISK_RE  = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
 SMALL_LOTS_RE    = re.compile(r'\b(SMALL\s*LOTS|USE\s*SMALL\s*LOTS)\b', re.I)
 
 # Close phrases (expanded)
-CLOSE_ANY_RE       = re.compile(r'\b(close|close\s+all|close\s+at\s+market|close\s+now|flatten|exit\s+now|liquidate)\b', re.I)
+CLOSE_ANY_RE = re.compile(
+    r'\b(?:close(?!\s+to)\b|close\s+all|close\s+at\s+market|close\s+now|flatten|exit\s+now|liquidate)\b',
+    re.I
+)
 CLOSE_WITH_SYM_RE  = re.compile(r'\bclose\b.*?\b([A-Z]{3,6}|[A-Z]{2,5}\d{2,3}|xau|gold|us30|dj30|nas100|spx500|de40|xbrusd|xtiusd|usoil|wti|ukoil|brent)\b', re.I)
 
 # Pending & inline header patterns
@@ -243,6 +249,13 @@ def parse_tp_moves(text: str):
     sym = normalize_symbol(ms.group(1)) if ms else ""
     return {"symbol": sym, "moves": moves}
 
+def _sanitize_price(v):
+    if v is None:
+        return None
+    # Negative prices are almost never intended in FX/CFD signals;
+    # many channels write "SL- 95.34" with a hyphen as a separator.
+    return abs(v)
+
 def try_extract_sl(line: str):
     line = normalize_spaces(line)
     for pat in SL_PATTERNS:
@@ -250,7 +263,7 @@ def try_extract_sl(line: str):
         if m:
             v = num(m.group(1))
             if v is not None:
-                return v
+                return _sanitize_price(v)
     return None
 
 def try_extract_tp(line: str):
@@ -260,7 +273,7 @@ def try_extract_tp(line: str):
         if m:
             v = num(m.group(1))
             if v is not None:
-                return v
+                return _sanitize_price(v)
     return None
 
 def parse_correction(text: str):

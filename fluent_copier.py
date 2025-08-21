@@ -166,9 +166,12 @@ SL_RES = [
     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 TP_RES = [
-    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'\bTP\d*\s+(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # TP @ 3349  | TP@3349
+    re.compile(r'\bTP\d*\s*@\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # TP1 3349   | TP 3349   | TP1 = 3349 | TP1 -> 3349
+    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # line starts with TP… followed by a price
+    re.compile(r'^\s*TP\d*\s*@?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
 ]
 # Break-even hint (“SL to entry at TP1”)
 BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)
@@ -177,9 +180,9 @@ HALF_RISK_RE = re.compile(r'\bHALF\s*RISK\b', re.I)
 DOUBLE_RISK_RE = re.compile(r'\bDOUBLE\s*RISK\b', re.I)
 QUARTER_RISK_RE = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
 
-# Close phrases (expanded set)
+# Close phrases
 CLOSE_ANY_RE = re.compile(
-    r'\b(close|close\s+all|close\s+at\s+market|close\s+now|flatten|exit\s+now|liquidate)\b',
+    r'\b(?:close(?!\s+to)\b|close\s+all|close\s+at\s+market|close\s+now|flatten|exit\s+now|liquidate)\b',
     re.I
 )
 
@@ -214,13 +217,20 @@ def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
             out.append({"slot": slot, "to": to_val})
     return out
 
+def _sanitize_price(v: Optional[float]) -> Optional[float]:
+    if v is None:
+        return None
+    # In trading signals, negative prices are virtually never intended.
+    # Treat leading '-' used as a visual separator as accidental.
+    return abs(v)
+
 def _try_sl(line: str) -> Optional[float]:
     for r in SL_RES:
         m = r.search(line)
         if m:
             v = _num(m.group(1))
             if v is not None:
-                return v
+                return _sanitize_price(v)
     return None
 
 def _try_tp(line: str) -> Optional[float]:
@@ -229,7 +239,7 @@ def _try_tp(line: str) -> Optional[float]:
         if m:
             v = _num(m.group(1))
             if v is not None:
-                return v
+                return _sanitize_price(v)
     return None
 
 def parse_message(text: str) -> Optional[Dict[str, Any]]:
@@ -251,18 +261,26 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         return {"kind": "MODIFY_TP", "symbol": sym, "tp_moves": tp_moves}
 
     # ---- MODIFY ----
-    if any(k in low for k in ["updated","update","edit","typo","correction"]):
-        new_sl=None; tps=[]
+    if any(k in low for k in ["updated", "update", "edit", "typo", "correction"]):
+        new_sl = None; tps = []
+        # try to find a symbol in the text (was missing before)
+        ms = SYM_RE.search(t)
+        sym = normalize_symbol(ms.group(1)) if ms else ""
         for line in t.splitlines():
             line = _normalize_spaces(line)
-            s=line.strip().lower()
+            s = line.strip().lower()
             if "sl" in s and "entry" not in s:
-                v=_try_sl(line)
-                if v is not None: new_sl=v
+                v = _try_sl(line)
+                if v is not None:
+                    new_sl = v
             if "tp" in s:
-                v=_try_tp(line)
-                if v is not None: tps.append(v)
-        return {"kind":"MODIFY","symbol":"","new_sl":new_sl,"new_tps":tps}
+                v = _try_tp(line)
+                if v is not None:
+                    tps.append(v)
+        # do not emit a MODIFY with no actual changes
+        if new_sl is None and not tps:
+            return None
+        return {"kind": "MODIFY", "symbol": sym, "new_sl": new_sl, "new_tps": tps}
 
     side=None; symbol=None; entry=None; sl=None; tps=[]
     be_on_tp = 1 if BE_HINT_RE.search(t) else 0
