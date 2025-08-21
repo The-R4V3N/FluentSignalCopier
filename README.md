@@ -108,6 +108,18 @@ Option 2: Command-line Bridge (Headless)
 
 Both commands run inside the Poetry-managed virtual environment.
 
+## Building exe
+
+``` powershell
+    poetry run pyinstaller --clean --noconfirm --onefile --noconsole `
+  --name FluentSignalCopier `
+  --icon .\app.ico `
+  --add-data "app.ico;." `
+  --collect-all PySide6 `
+  --collect-all qfluentwidgets `
+  .\fluent_copier.py
+```
+
 ## 🛠️ Troubleshooting
 
 | Issue      | Solution                                                                 |

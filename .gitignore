@@ -254,3 +254,8 @@ desktop.ini
 
 # Python version manager file (optional)
 #.python-version
+
+# --- Extra ignores for this repo ---
+
+# Ignore legacy/exported pip requirements (we use Poetry only)
+requirements*.txt

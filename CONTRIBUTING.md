@@ -8,43 +8,60 @@ This guide explains how to set up your environment, coding standards, commit con
 
 - **Clone the repo**:
 
-```bash
-git clone https://github.com/The-R4V3N/FluentSignalCopier.git
-cd FluentSignalCopier
+```powershell
+    git clone https://github.com/The-R4V3N/FluentSignalCopier.git
+    cd FluentSignalCopier
 ```
 
-- **Create a virtual environment (recommended)**:
+- **Install dependencies with Poetry:**:
 
-```bash
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS/Linux
-source .venv/bin/activate
+Make sure you have Poetry installed (recommended via pipx)
+
+```powershell
+    poetry install --no-root
 ```
 
-- **Install dependencies**:
+This will install all runtime + dev dependencies into a Poetry-managed virtual environment.
 
-```bash
-pip install -r requirements.txt
-# (optional, dev tools)
-pip install -r requirements-dev.txt
+- **Activate the virtual environment:**:
 
+```powershell
+    poetry shell
 ```
 
 - **Run locally**:
 
 - GUI
 
-```bash
-python fluent_copier.py
+```powershell
+    poetry run python fluent_copier.py
 ```
 
 - CLI
 
-```bash
-python telegram_bridge.py
+```powershell
+    poetry run python telegram_bridge.py
 ```
+
+## Building exe
+
+``` powershell
+    poetry run pyinstaller --clean --noconfirm --onefile --noconsole `
+  --name FluentSignalCopier `
+  --icon .\app.ico `
+  --add-data "app.ico;." `
+  --collect-all PySide6 `
+  --collect-all qfluentwidgets `
+  .\fluent_copier.py
+```
+
+- **Notes:**
+
+- collect-all PySide6 ensures Qt plugins (platforms, styles, etc.) are bundled.
+- collect-all qfluentwidgets pulls in QFluentWidgets assets.
+- noconsole hides the console window for GUI builds. For debugging, drop it.
+
+Binary lands in dist/FluentSignalCopier(.exe).
 
 - **🧑‍💻 Coding Standards**:
 
@@ -59,30 +76,37 @@ python telegram_bridge.py
 
 - We use Conventional Commits. Each message must be:
 
-```bash
-<type>(optional scope): <short description>
+``` powershell
+    <type>(optional scope): <short description>
 ```
+
+- **Ensure version is correct:**
+
+- README.md badge
+- CHANGELOG.md
 
 - **Allowed types**:
 
-feat:       A new feature
-fix:        A bug fix
-docs:       Documentation only changes
-style:      Changes that do not affect the meaning of the code (white-space, formatting, etc)
-refactor:   A code change that neither fixes a bug nor adds a feature
-perf:       A code change that improves performance
-test:       Adding missing or correcting existing tests
-build:      Changes to the build system or dependencies
-ci:         Changes to CI/CD configuration
-chore:      Changes to the build process or auxiliary tools and libraries such as documentation generation
-revert:     Revert a previous commit
+``` powershell
+    feat:       A new feature
+    fix:        A bug fix
+    docs:       Documentation only changes
+    style:      Changes that do not affect the meaning of the code (white-space, formatting, etc)
+    refactor:   A code change that neither fixes a bug nor adds a feature
+    perf:       A code change that improves performance
+    test:       Adding missing or correcting existing tests
+    build:      Changes to the build system or dependencies
+    ci:         Changes to CI/CD configuration
+    chore:      Changes to the build process or auxiliary tools and libraries such as documentation generation
+    revert:     Revert a previous commit
 
-- **Examples**:
+    Examples:
 
-- feat(parser): score CLOSE/MODIFY signals
-- fix(gui): render log lines without ANSI colors
-- docs: add SECURITY policy
-- ci: add commitlint workflow
+    feat(parser): score CLOSE/MODIFY signals
+    fix(gui): render log lines without ANSI colors
+    docs: add SECURITY policy
+    ci: add commitlint workflow
+```
 
 Local enforcement: Husky runs commitlint on commit/push if you’ve set it up locally.
 Remote enforcement: CI also runs commitlint on PRs.
@@ -91,8 +115,8 @@ Remote enforcement: CI also runs commitlint on PRs.
 
 - **Create a new branch for your feature/fix**:
 
-```bash
-git checkout -b feature/my-new-thing
+```powershell
+    git checkout -b feature/my-new-thing
 ```
 
 Before opening a PR:
@@ -114,8 +138,8 @@ PR checklist
 
 - Run unit tests before submitting PRs:
 
-```bash
-pytest
+```powershell
+    poetry run pytest
 ```
 
 Manual checks (as applicable):
@@ -135,36 +159,36 @@ When cutting a release, bump versions in:
 
 Example (0.9.1 → 0.10.0):
 
-```bash
-StringStruct('FileVersion', '0.10.0')
-StringStruct('ProductVersion', '0.10.0')
+```powershell
+    StringStruct('FileVersion', '0.10.0')
+    StringStruct('ProductVersion', '0.10.0')
 ```
 
 - **Release steps**:
 
-```bash
-# after updating files & changelog
-git commit -m "chore(release): v0.10.0"
-git tag v0.10.0
-git push origin v0.10.0
+```powershell
+    poetry version 0.10.0
+    git commit -m "chore(release): v0.10.0"
+    git tag v0.10.0
+    git push origin v0.10.0
 ```
 
 Publish a GitHub release; attach built .exe artifacts if you’re distributing binaries.
 
 - **🧰 Useful Local Commands**:
 
-Run commitlint on recent commits:
+- Check commit messages:
 
-```bash
-npx commitlint --from=HEAD~10 --to=HEAD
+```powershell
+    npx commitlint --from=HEAD~10 --to=HEAD
 ```
 
-Format/lint (if you use black/ruff/pytest in dev):
+- Format + lint:
 
-```bash
-black .
-ruff check .
-pytest
+```powershell
+    poetry run black .
+    poetry run ruff check .
+    poetry run pytest
 ```
 
 - **Code of Conduct**:
