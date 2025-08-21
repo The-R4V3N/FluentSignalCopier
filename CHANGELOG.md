@@ -36,7 +36,15 @@
 
 ### Fixed
 
+- **telegram_bridge.py**
+  - Prevented false `TP` captures when messages only contain placeholders like `TP1 / TP2 / TP3` without numeric values.
+  - Sanitized decorative hyphens (`SL-95.34`) to avoid parsing them as negative prices.
+  - Fixed false-positive CLOSE detection on phrases like *"close to entry"* by tightening regex.
+
+- **fluent_copier.py**
+  - Synced regex/parsing improvements with bridge logic to ensure consistency between GUI and CLI.
 - CLOSE and MODIFY signals no longer skipped by confidence threshold; slider now only applies to OPEN signals.
+
 - **Break-even logic**: ensured that when "SL to entry at TP1" triggers, *all remaining TP-linked positions under the same OID* have their SL moved to entry, instead of only the first.
 
 ## [0.9.1-beta] - 2025-08-17
