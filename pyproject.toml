@@ -26,8 +26,9 @@ commitizen = ">=3.20.0"
 
 
 [tool.poetry.scripts]
-fluent-gui = "fluent_copier:main"         # file `fluent_copier.py` at repo root
-telegram-bridge = "telegram_bridge:main"  # file `telegram_bridge.py` at repo root
+fluent-gui = "fluent_copier:main"                   # file `fluent_copier.py` at repo root
+telegram-bridge = "telegram_bridge:main"            # file `telegram_bridge.py` at repo root
+monitor-dashboard = "monitoring_dashboard:main"     # file `monitoring_dashboard.py` at repo root
 
 [build-system]
 requires = ["poetry-core"]
