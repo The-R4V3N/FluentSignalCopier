@@ -9,6 +9,7 @@
 - GUI log integration with color-tagged [INFO], [WARN], [ERROR] badges.
 - Real-time monitoring dashboard (`monitoring_dashboard.py`) to visualize logs.
 - Alert system (`alert_system.py`) for critical errors and notifications.
+- Added `InpHeartbeatPopupAlerts` to the pyproject.toml.
 
 ### 📚 Docs / Dev (no functional change)
 
