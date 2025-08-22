@@ -1,14 +1,13 @@
 # fluent_copier.py
 # Modern Windows GUI (PySide6 + QFluentWidgets) for Telegram -> MT5 file-drop copier
 # Build Example
-# pyinstaller --clean --noconsole --onefile `
-#    --name FluentSignalCopier `
-#    --icon .\app.ico `
-#    --add-data "app.ico;." `
-#    --version-file .\version_info.txt `
-#    --collect-all qfluentwidgets `
-#    --collect-all PySide6 `
-#    .\fluent_copier.py
+#    poetry run pyinstaller --clean --noconfirm --onefile --noconsole `
+#  --name FluentSignalCopier `
+#  --icon .\app.ico `
+#  --add-data "app.ico;." `
+#  --collect-all PySide6 `
+#  --collect-all qfluentwidgets `
+#  .\fluent_copier.py
 
 import os, re, sys, json, time, asyncio
 from dataclasses import dataclass, asdict
