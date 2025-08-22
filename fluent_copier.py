@@ -177,6 +177,28 @@ TP_RES = [
     # line starts with TP… followed by a price
     re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
+
+# --- Order-type cues ---
+# Header like: "#EURUSD Buy Limit @ 1.15500"
+HEADER_PENDING_FULL_RE = re.compile(
+    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
+    r'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>-?\d+(?:[.,]\d+)?)\b',
+    re.I | re.M
+)
+
+# Header like: "#XAUUSD BUY @ 2337.0" (inline price – NOT a pending unless LIMIT/STOP is present)
+HEADER_INLINE_PRICE_RE = re.compile(
+    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
+    r'(?P<side>BUY|SELL)\s+@?\s*(?P<price>-?\d+(?:[.,]\d+)?)\b',
+    re.I | re.M
+)
+
+# BUY/SELL NOW (or AT/@ MARKET) → force market
+NOW_MARKET_RE = re.compile(r'\b(BUY|SELL)\s+(?:NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
+
+# Any explicit LIMIT/STOP phrasing anywhere → pending
+PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL)\s+(LIMIT|STOP)\b', re.I)
+
 # Break-even hint (“SL to entry at TP1”)
 BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)
 RISK_PCT_RE = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
@@ -267,7 +289,6 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     # ---- MODIFY ----
     if any(k in low for k in ["updated", "update", "edit", "typo", "correction"]):
         new_sl = None; tps = []
-        # try to find a symbol in the text (was missing before)
         ms = SYM_RE.search(t)
         sym = normalize_symbol(ms.group(1)) if ms else ""
         for line in t.splitlines():
@@ -281,13 +302,42 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
                 v = _try_tp(line)
                 if v is not None:
                     tps.append(v)
-        # do not emit a MODIFY with no actual changes
         if new_sl is None and not tps:
             return None
         return {"kind": "MODIFY", "symbol": sym, "new_sl": new_sl, "new_tps": tps}
 
+    # ---- OPEN parsing (with order-type classification) ----
     side=None; symbol=None; entry=None; sl=None; tps=[]
+    order_type = "MARKET"           # default to market unless we *see* LIMIT/STOP
     be_on_tp = 1 if BE_HINT_RE.search(t) else 0
+
+    # 1) Strong header: "#EURUSD Buy Limit @ 1.15500" → PENDING
+    m = HEADER_PENDING_FULL_RE.search(t)
+    if m:
+        symbol = normalize_symbol(m.group('sym'))
+        side   = m.group('side').upper()
+        entry  = _num(m.group('price'))
+        ptype  = m.group('ptype').upper()
+        order_type = "LIMIT" if ptype == "LIMIT" else "STOP"
+    else:
+        # 2) Inline header "BUY @ 2337.0" (this is *not* pending by itself)
+        m2 = HEADER_INLINE_PRICE_RE.search(t)
+        if m2:
+            symbol = normalize_symbol(m2.group('sym'))
+            side   = m2.group('side').upper()
+            entry  = _num(m2.group('price'))
+
+        # 3) Global cues override:
+        if PENDING_PAIR_RE.search(t):
+            # any "BUY/SELL LIMIT|STOP" anywhere → use that, keep entry from header/ENTRY line
+            pm = PENDING_PAIR_RE.search(t)
+            pside, ptyp = pm.group(1).upper(), pm.group(2).upper()
+            side = side or pside
+            order_type = "LIMIT" if ptyp == "LIMIT" else "STOP"
+        elif NOW_MARKET_RE.search(t):
+            order_type = "MARKET"
+
+    # Now do the normal line scans (side/symbol/ENTRY/SL/TP)
     lines=[_normalize_spaces(l).strip() for l in t.splitlines() if l.strip()]
     for ln in lines:
         if side is None:
@@ -299,6 +349,7 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         if entry is None:
             me=ENTRY_RE.search(ln)
             if me: entry=_num(me.group(1))
+
     for ln in lines:
         lo=ln.lower()
         if "sl" in lo and "entry" not in lo:
@@ -308,7 +359,7 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
             v=_try_tp(ln)
             if v is not None: tps.append(v)
 
-    # Fallback: some channels use odd spacing/punct. If still no SL, scan whole text.
+    # Fallback SL scan
     if sl is None:
         m = _SL_FALLBACK.search(t)
         if m:
@@ -318,13 +369,33 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
 
     if not (side and symbol):
         return None
+
+    # Risk %
     risk=None
     m=RISK_PCT_RE.search(t)
     if m: risk=_num(m.group(1))
     elif HALF_RISK_RE.search(t): risk=0.5
     elif DOUBLE_RISK_RE.search(t): risk=2.0
     elif QUARTER_RISK_RE.search(t): risk=0.25
-    return {"kind":"OPEN","side":side,"symbol":symbol,"entry":entry,"sl":sl,"tps":tps,"be_on_tp":be_on_tp,"risk":risk}
+
+    # IMPORTANT: If order_type is MARKET, we treat “entry” as a *reference only*.
+    # Do not output 'entry' (so the EA won’t open a pending by mistake).
+    entry_ref = entry
+    if order_type == "MARKET":
+        entry = None
+
+    return {
+        "kind": "OPEN",
+        "side": side,
+        "symbol": symbol,
+        "order_type": order_type,   # "MARKET" | "LIMIT" | "STOP"
+        "entry": entry,             # None for MARKET
+        "entry_ref": entry_ref,     # preserves original number for logs
+        "sl": sl,
+        "tps": tps,
+        "be_on_tp": be_on_tp,
+        "risk": risk,
+    }
 
 
 # =====================================================================
@@ -782,23 +853,27 @@ class CopierThread(QThread):
                         "raw": (txt.strip()[:1000]),
                         "side": p["side"],
                         "symbol": sym,
-                        "entry": p.get("entry"),
+                    
+                        # Order typing
+                        "order_type": p.get("order_type") or "MARKET",                  # "MARKET" | "LIMIT" | "STOP"
+                        "entry": p.get("entry"),                                        # None for MARKET
+                        "entry_ref": p.get("entry_ref"),                                # reference only (always safe to log)
+                    
                         "sl": p.get("sl"),
-                        # NEW: backward-compatible + structured outputs
-                        "tp": tp_first,             # <- legacy EA reader
-                        "tps": tps_list,            # <- structured list
-                        "tps_csv": tps_csv,         # <- legacy CSV
+                        "tp": tp_first,                                                 # legacy single TP for EA
+                        "tps": tps_list,                                                # structured list
+                        "tps_csv": tps_csv,                                             # legacy CSV
                         "risk_percent": (1.0 if p.get("risk") is None else p["risk"]),
                         "lots": None,
                         "be_on_tp": int(p.get("be_on_tp") or 0),
                         "gid": str(gid),
                         "original_event_id": str(event.id),
-                        "confidence": conf
+                        "confidence": conf,
                     }
                     with self.signal_file.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
                     self.last_open_oid[(source_key, sym)] = msg_id
-                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p.get('sl')} TP={tp_first} TPs={tps_csv} (conf={conf})")
+                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} [{p.get('order_type','MARKET')}] SL={p.get('sl')} TP={tp_first} TPs={tps_csv} (conf={conf})")
                     _beep_ok()
 
                 @self.client.on(events.MessageEdited)

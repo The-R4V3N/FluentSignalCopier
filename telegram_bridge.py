@@ -226,6 +226,11 @@ CORR_SL_TYP0_RE   = re.compile(r'\b(?:typo|correct|correction).*\bSL\b.*?(?:was\
 CORR_SL_TO_RE     = re.compile(r'\b(edit(?:ing)?|update(?:d)?)\b.*\bSL\b.*\bto\b\s*(-?\d+(?:[.,]\d+)?)', re.I)
 SYMBOL_HINT_RE    = re.compile(r'\b(gold|xauusd|xau|nas100|us100|ustec|dj30|us30|dow|spx500|sp500|us500|de40|dax|ger40|gbpjpy|xbrusd|xtiusd|usoil|wti|ukoil|brent)\b', re.I)
 
+# Execution / intent cues
+NOW_MARKET_RE   = re.compile(r'\b(?:BUY\s+NOW|SELL\s+NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
+PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL)\s+(LIMIT|STOP)\b', re.I)
+
+
 # =====================================================================
 # Parsing helpers
 # =====================================================================
@@ -336,14 +341,20 @@ def parse_block_style(text: str):
     tps = []
     be_on_tp = 1 if BE_HINT_RE.search(t) else 0
 
+    # NEW: default to MARKET unless we see LIMIT/STOP explicitly
+    order_type = "MARKET"
+
     # 1) Header with LIMIT/STOP and price
     m = HEADER_PENDING_FULL_RE.search(t)
     if m:
         symbol = normalize_symbol(m.group('sym'))
         side   = m.group('side').upper()
         entry  = num(m.group('price'))
+        ptype  = (m.group('ptype') or "").upper()
+        if ptype in ("LIMIT", "STOP"):
+            order_type = ptype  # LIMIT or STOP
     else:
-        # 2) Header with inline price (BUY @ price)
+        # 2) Header with inline price (BUY @ price) – does NOT imply pending
         m2 = HEADER_INLINE_PRICE_RE.search(t)
         if m2:
             symbol = normalize_symbol(m2.group('sym'))
@@ -370,7 +381,7 @@ def parse_block_style(text: str):
                 if entry is not None:
                     break
 
-    # 5) SL & TPs
+    # 5) SL & TPs (unchanged)
     for ln in lines:
         low = ln.lower()
         if any(w in low for w in ('sl','stop','stoploss')):
@@ -386,7 +397,6 @@ def parse_block_style(text: str):
                 tps.append(v)
                 continue
 
-    # Fallback SL scan across the whole message (handles NBSP/commas)
     if sl is None:
         m = SL_FALLBACK.search(t)
         if m:
@@ -397,7 +407,18 @@ def parse_block_style(text: str):
     if not side or not symbol:
         return None
 
-    # Risk & lots overrides
+    # --- NEW: global cues override / confirm order_type
+    pm = PENDING_PAIR_RE.search(t)
+    if pm:
+        # any “… LIMIT/STOP” anywhere → pending
+        order_type = pm.group(2).upper()  # LIMIT or STOP
+        # side can be filled from this too if missing
+        if side is None:
+            side = pm.group(1).upper()
+    elif NOW_MARKET_RE.search(t):
+        order_type = "MARKET"
+
+    # Risk & lots overrides (unchanged)
     risk_percent = None
     m = RISK_PCT_RE.search(t)
     if m:
@@ -410,15 +431,22 @@ def parse_block_style(text: str):
     if SMALL_LOTS_RE.search(t) and normalize_symbol(symbol) in OIL_BASE_SYMBOLS:
         lots_override = OIL_SMALL_LOTS
 
+    # IMPORTANT: if MARKET, do not let 'entry' accidentally cause a pending.
+    entry_ref = entry
+    if order_type == "MARKET":
+        entry = None
+
     return {
         "side": side,
         "symbol": symbol,
-        "entry": entry,
+        "entry": entry,             # None for MARKET
+        "entry_ref": entry_ref,     # keep reference for logs
         "sl": sl,
         "tps": tps,
         "be_on_tp": be_on_tp,
         "risk_percent": risk_percent,
-        "lots": lots_override
+        "lots": lots_override,
+        "order_type": order_type    # MARKET | LIMIT | STOP
     }
 
 # =====================================================================
@@ -559,7 +587,9 @@ async def main():
             "raw": txt.strip(),
             "side": parsed["side"],
             "symbol": sym,
-            "entry": parsed["entry"],
+            "entry": parsed["entry"],                      # None for MARKET
+            "entry_ref": parsed.get("entry_ref"),          # just reference/logging
+            "order_type": parsed.get("order_type", "MARKET"),
             "sl": parsed["sl"],
             "tp": None,
             "risk_percent": risk,
@@ -575,7 +605,7 @@ async def main():
 
         with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=True) + "\n")
-        print(f"[SAVED] OPEN {sym} {parsed['side']} SL={parsed['sl']} TPs={rec['tps_csv']} (gid={gid})")
+        print(f"[SAVED] OPEN {sym} {parsed['side']} [{parsed.get('order_type','MARKET')}] SL={parsed['sl']} TPs={rec['tps_csv']} (gid={gid})")
 
     @client.on(events.MessageEdited)
     async def edited(event):

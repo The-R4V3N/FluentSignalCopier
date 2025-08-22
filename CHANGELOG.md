@@ -31,6 +31,37 @@
 - Logs now stored with rotation and optional alerting.
 - Cleaner error handling, unified log format across modules.
 
+EA (FluentSignalCopier.mq5)
+
+- Added explicit MARKET vs PENDING routing:
+- order_type now respected (MARKET, LIMIT, STOP).
+- Backward-compatible fallback to legacy behavior (presence of entry decides pending).
+- Unified execution: MARKET uses Buy/Sell, PENDING routes via PlacePending.
+- Improved debug logging with route info: side, symbol, order type, entry, and decision.
+- Minor cleanup of redundant entry handling.
+
+Bridge (telegram_bridge.py / fluent_copier.py)
+
+- Added duplicate/replay suppression to prevent double execution.
+- Implemented signal confidence scoring:
+- Validates presence of SL/TP, format consistency.
+- Marks/filters low-confidence signals.
+- Added emergency stop signal forwarding (EMERGENCY_CLOSE_ALL).
+- Improved message parsing:
+- Unified parsing of LIMIT/STOP/MARKET keywords.
+- Normalized symbol/side extraction for robustness.
+- Expanded structured JSONL output with order_type and confidence fields.
+
+GUI / Dashboard
+
+- Added Emergency Stop button to send EMERGENCY_CLOSE_ALL.
+- Added real-time deduplication status indicator.
+- Integrated confidence scoring display in parsed signals list.
+- Improved live monitoring panel:
+- Shows signals processed, errors, warnings, open positions.
+- Heartbeat monitoring with stale warnings.
+- Added sound alerts for new signals and emergency events.
+
 ### Removed
 
 - Ad-hoc `print()` debugging → replaced with structured logs.
