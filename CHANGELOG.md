@@ -37,6 +37,12 @@
 
 ### Fixed
 
+- **telegram_bridge.py / fluent_copier.py**
+  - Ensure `"tp"` field is set to the **first take-profit** for backward compatibility.
+  - Add structured `"tps"` list alongside legacy `"tps_csv"` string.
+  - Prevents cases where signals with multiple TPs had `"tp": null`,
+    leading to missing TP in legacy EAs.
+
 - **telegram_bridge.py**
   - Corrected TP parsing regex to capture full decimal values.
   - Previously, values like `198.600` were truncated to `198.0`,
@@ -52,6 +58,13 @@
 - CLOSE and MODIFY signals no longer skipped by confidence threshold; slider now only applies to OPEN signals.
 
 - **Break-even logic**: ensured that when "SL to entry at TP1" triggers, *all remaining TP-linked positions under the same OID* have their SL moved to entry, instead of only the first.
+
+### Improved
+
+- Duplicate/rapid replay handling:
+  - Added clearer logging when duplicate signals are suppressed
+    (e.g., channels forwarding their own message or sending quick edits).
+  - No functional change—ensures trades aren’t opened twice.
 
 ## [0.9.1-beta] - 2025-08-17
 

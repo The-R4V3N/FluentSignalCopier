@@ -12,6 +12,7 @@
 import os, re, sys, json, time, asyncio
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from turtle import title
 from typing import Optional, Dict, Any, List, Iterable
 from html import escape
 
@@ -28,6 +29,8 @@ from qfluentwidgets import (
 
 from telethon import TelegramClient, events
 from telethon.errors import SessionPasswordNeededError
+
+from telegram_bridge import RECENT_SYMBOL_BY_CHAT
 
 # optional sound beeps (Windows); safe no-ops elsewhere
 try:
@@ -530,7 +533,7 @@ class CopierThread(QThread):
         h = hashlib.sha1((txt.strip()[:400]).encode("utf-8", "ignore")).hexdigest()[:12]
         return f"{chat_id}:{msg_id}:{h}"
 
-    def _dedupe_check(self, key: str, window=8.0) -> bool:
+    def _dedupe_check(self, key: str, window=3.0) -> bool:
         now = time.time()
         # purge old
         if self._recent_seen:
@@ -766,6 +769,10 @@ class CopierThread(QThread):
                     self.recent_symbol_by_chat[source_key] = sym
                     gid = self._next_id()
 
+                    tps_list = p.get("tps") or []
+                    tp_first = (tps_list[0] if tps_list else None)
+                    tps_csv  = ",".join(str(x) for x in tps_list) if tps_list else ""
+
                     rec = {
                         "action": "OPEN",
                         "id": str(msg_id),
@@ -773,13 +780,17 @@ class CopierThread(QThread):
                         "t": int(time.time()),
                         "source": title,
                         "raw": (txt.strip()[:1000]),
-                        "side": p["side"], "symbol": sym,
-                        "entry": p["entry"], "sl": p["sl"],
-                        "tp": None,
-                        "risk_percent": (1.0 if p["risk"] is None else p["risk"]),
+                        "side": p["side"],
+                        "symbol": sym,
+                        "entry": p.get("entry"),
+                        "sl": p.get("sl"),
+                        # NEW: backward-compatible + structured outputs
+                        "tp": tp_first,             # <- legacy EA reader
+                        "tps": tps_list,            # <- structured list
+                        "tps_csv": tps_csv,         # <- legacy CSV
+                        "risk_percent": (1.0 if p.get("risk") is None else p["risk"]),
                         "lots": None,
-                        "tps_csv": ",".join(str(x) for x in (p["tps"] or [])) if p["tps"] else "",
-                        "be_on_tp": int(p["be_on_tp"] or 0),
+                        "be_on_tp": int(p.get("be_on_tp") or 0),
                         "gid": str(gid),
                         "original_event_id": str(event.id),
                         "confidence": conf
@@ -787,11 +798,18 @@ class CopierThread(QThread):
                     with self.signal_file.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
                     self.last_open_oid[(source_key, sym)] = msg_id
-                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p['sl']} TPs={rec['tps_csv']} (conf={conf})")
+                    self.logLine.emit(f"[WRITE] OPEN {sym} {p['side']} SL={p.get('sl')} TP={tp_first} TPs={tps_csv} (conf={conf})")
                     _beep_ok()
 
                 @self.client.on(events.MessageEdited)
                 async def on_edit(event):
+                    # give edits a distinct key so they’re handled once
+                    chat_id = event.chat_id
+                    msg_id  = event.id
+                    key = self._dedupe_key(chat_id, msg_id, event.raw_text or "") + ":edit"
+                    if self._dedupe_check(key):
+                        self.logLine.emit("[INFO] Duplicate/rapid replay (edit) suppressed")
+                        return
                     await on_new_message(event)
 
                 # heartbeat pinger
