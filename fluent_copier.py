@@ -166,12 +166,14 @@ SL_RES = [
     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 TP_RES = [
-    # TP @ 3349  | TP@3349
-    re.compile(r'\bTP\d*\s*@\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
-    # TP1 3349   | TP 3349   | TP1 = 3349 | TP1 -> 3349
-    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # "TP @ 198.600", "TP@198.600"
+    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+
+    # "TP1 198.600", "TP 198.600", "TP1 = 198.600", "TP1 -> 198.600"
+    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+
     # line starts with TP… followed by a price
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 # Break-even hint (“SL to entry at TP1”)
 BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)

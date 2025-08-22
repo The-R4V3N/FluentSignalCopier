@@ -172,12 +172,14 @@ SL_PATTERNS = [
     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 TP_PATTERNS = [
-    # "TP @ 3349", "TP@3349"
-    re.compile(r'\bTP\d*\s*@\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
-    # "TP1 3349", "TP 3349", "TP1 = 3349", "TP1 -> 3349"
-    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    # "TP @ 198.600", "TP@198.600"  (accept full decimals; no bare TPn without price)
+    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+
+    # "TP1 198.600", "TP 198.600", "TP1 = 198.600", "TP1 -> 198.600"
+    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+
     # line starts with TP… followed by a price
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?(?:\d{3,}|\d+[.,]\d+))\b', re.I),
+    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
 # Very tolerant whole-text SL fallback (handles NBSP / commas)

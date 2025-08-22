@@ -38,6 +38,11 @@
 ### Fixed
 
 - **telegram_bridge.py**
+  - Corrected TP parsing regex to capture full decimal values.
+  - Previously, values like `198.600` were truncated to `198.0`,
+    causing wrong TP levels in MT5 execution.
+
+- **telegram_bridge.py**
   - Prevented false `TP` captures when messages only contain placeholders like `TP1 / TP2 / TP3` without numeric values.
   - Sanitized decorative hyphens (`SL-95.34`) to avoid parsing them as negative prices.
   - Fixed false-positive CLOSE detection on phrases like *"close to entry"* by tightening regex.
