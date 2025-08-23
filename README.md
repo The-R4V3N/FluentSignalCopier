@@ -1,4 +1,4 @@
-# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.10.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
+# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.11.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
 
 A production-ready bridge that reads trading signals from **Telegram** and executes them in **MetaTrader 5** via an Expert Advisor (EA).
 
@@ -14,7 +14,19 @@ A production-ready bridge that reads trading signals from **Telegram** and execu
 - **Broker compatibility**: Symbol mapping (aliases like `US30 → DJ30`) and prefix/suffix support
 - **GUI and CLI**: User-friendly interface for configuration and monitoring, plus a command-line option for automation
 
+## User Interface
+
 ![FluentSignalCopier GUI](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/image.png)
+
+## New Modern User Interface
+
+## User interface Dashboard
+
+![FluentSignalCopier GUI Home](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home.png)
+
+## User interface Settings
+
+![FluentSignalCopier GUI Settings](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_settings.png)
 
 ## 🆕 Latest Features
 

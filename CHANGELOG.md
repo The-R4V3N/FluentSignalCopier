@@ -1,6 +1,29 @@
 <!-- markdownlint-disable MD024 -->
 # Changelog
 
+## [0.11.0] - 2025-08-23
+
+Changelog (GUI refresh)
+Added
+
+- Tracked-only channel count: “Channels” card now reflects tracked chats (from Settings), not cached dialogs.
+- Chat picker seeded with current watch list (tracked chats pre-selected / prioritized).
+
+Changed
+
+- Wider layout: setMinimumSize(1200x750) and default resize(1320x860) for breathing room.
+- Dashboard spacing & card grid polish.
+- Pause button now toggles text between “Pause” and “Resume”.
+- Removed noisy log lines for [RUN] Intake PAUSED/RESUMED (toast + button flip only).
+
+Fixed
+
+- Crash on STOP: restored _hideAuthBox() and auth UI helpers.
+- QListWidgetItem NameError in chat picker (imported properly).
+- Pending task warning on exit: heartbeat task is tracked/cancelled; loop shutdown is clean; closeEvent waits for thread.
+- Duplicated “added chats” toast and text set in onDialogsReady.
+- _update_tracked_count defined at class level and called only after pages exist.
+
 ## [0.10.0] - 2025-08-17
 
 ### Added
