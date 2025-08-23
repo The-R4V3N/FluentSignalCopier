@@ -37,6 +37,12 @@ This will install all runtime + dev dependencies into a Poetry-managed virtual e
     poetry run python fluent_copier.py
 ```
 
+- To run the new GUI:
+
+```powershell
+    poetry run python fluent_copier_new_gui.py
+```
+
 - CLI
 
 ```powershell
@@ -53,6 +59,18 @@ This will install all runtime + dev dependencies into a Poetry-managed virtual e
   --collect-all PySide6 `
   --collect-all qfluentwidgets `
   .\fluent_copier.py
+```
+
+Build the new gui executable:
+
+``` powershell
+    poetry run pyinstaller --clean --noconfirm --onefile --noconsole `
+  --name FluentSignalCopier `
+  --icon .\app.ico `
+  --add-data "app.ico;." `
+  --collect-all PySide6 `
+  --collect-all qfluentwidgets `
+  .\fluent_copier_new_gui.py
 ```
 
 - **Notes:**
