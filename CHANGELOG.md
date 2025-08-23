@@ -5,6 +5,37 @@
 
 📓 Changelog
 
+Fluent Copier (new GUI)
+
+Log duplication fixed:
+
+- _appendLog no longer appends messages twice; cleaned up duplicate HTML block.
+- Added safety so logs show once per event, consistent with [INFO], [COUNTER], [SCAN], etc.
+
+Pause/Resume logs simplified:
+
+- Intake pause/resume now shows only a toast + button state, no duplicate [RUN] log spam.
+
+Heartbeat cleanup:
+
+- On window close, pending tasks are cancelled cleanly (no more “Task was destroyed but pending” warnings).
+
+Chat Picker:
+
+- Implemented correct filtering for “Show only watched” toggle.
+- Case-insensitive matching across title, @username, and numeric ID.
+- Fixed logic so only tracked channels are displayed when checkbox is on.
+- Search filter and toggle now work together reliably.
+
+Dashboard improvements:
+
+- Channels badge now reflects the number of tracked chats (not total cached dialogs).
+- Signals table automatically updates with incoming signals (OPEN, CLOSE, MODIFY, MODIFY_TP, EMERGENCY).
+
+Telegram Bridge
+
+- Minor consistency updates in logging for [COUNTER], [SCAN], and [RUN] to match new GUI parsing.
+
 UI Dashboard (fix)
 
 - Unified table update method: addSignalToTable (camelCase).

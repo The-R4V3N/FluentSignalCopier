@@ -427,7 +427,11 @@ class ChatPickerDialog(QDialog):
         self.resize(700, 560)
         self.setModal(True)
 
-        self.watch_set = watch_set or set()
+        # normalize the incoming watch set once
+        def _canon(s: str) -> str:
+            return (s or "").strip().lower()
+
+        self.watch_set = { _canon(x) for x in (watch_set or set()) }
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -486,47 +490,35 @@ class ChatPickerDialog(QDialog):
 
         # Filtering logic
         def apply_filters():
-            q = (self.search.text() or "").strip().lower()
+            q = _canon(self.search.text())
             only = self.onlyWatched.isChecked()
 
             for item in self._all_items:
-                data = item.data(Qt.UserRole)
-                chat_data = data["raw"]
+                raw = item.data(Qt.UserRole)["raw"]
+                title    = _canon(raw.get("title"))
+                username = _canon(raw.get("username"))
+                chat_id  = _canon(str(raw.get("id", "")))
 
-                # Build all possible identifiers for this chat
-                title = (chat_data.get("title") or "").lower()
-                username = (chat_data.get("username") or "").lower()
-                chat_id = str(chat_data.get("id", "")).lower()
+                # all identifiers we consider for matching
+                idents = {i for i in {
+                    title,
+                    username,
+                    f"@{username}" if username else "",
+                    chat_id
+                } if i}
 
-                # Create all possible searchable strings
-                identifiers = set()
-                if title: identifiers.add(title)
-                if username: 
-                    identifiers.add(username)
-                    identifiers.add(f"@{username}")
-                if chat_id: identifiers.add(chat_id)
+                # does the row match the text box?
+                text_match = (not q) or any(q in ident for ident in idents)
 
-                # Check if matches search query
-                text_match = not q or any(q in ident for ident in identifiers)
+                # is this chat in the watched list?
+                in_watch = bool(self.watch_set & idents)
 
-                # Check if in watch list (case-insensitive comparison)
-                in_watch_list = False
-                if self.watch_set:
-                    for watched in self.watch_set:
-                        watched_lower = watched.lower()
-                        # Check against all identifiers
-                        if (watched_lower in identifiers or 
-                            any(watched_lower == ident for ident in identifiers)):
-                            in_watch_list = True
-                            break
-        
-            # Show item if: matches text AND (not filtering or is in watch list)
-            show_item = text_match and (not only or in_watch_list)
-            item.setHidden(not show_item)
+                # final visibility
+                item.setHidden(not (text_match and (not only or in_watch)))
 
         self.search.textChanged.connect(apply_filters)
         self.onlyWatched.toggled.connect(apply_filters)
-        apply_filters()  # initial
+        apply_filters()  # initial filter on open
 
     def selected_entries(self) -> List[str]:
         out = []
@@ -1024,9 +1016,10 @@ class CopierThread(QThread):
                                 pass
                             await asyncio.sleep(5)
                     except asyncio.CancelledError:
-                        return  # exit quietly
+                        return
 
-                    self._hb_task = loop.create_task(_hb_writer())
+                # schedule once and keep the handle for shutdown
+               # self._hb_task = loop.create_task(_hb_writer())
 
                 loop.create_task(_hb_writer())
                 self.logLine.emit("[RUN] Connected & listening…")
@@ -1111,416 +1104,416 @@ class CopierThread(QThread):
         except Exception as e:
             self.logLine.emit(f"[STOP] scheduling error: {e}")
 
-class StatCard(QFrame):
-    """Simple KPI card with title, value and optional status dot."""
-    def __init__(self, title: str, value: str = "—", show_dot: bool = False, parent=None):
-        super().__init__(parent)
-        self.setFrameShape(QFrame.NoFrame)
-        self.setObjectName("StatCard")
+# class StatCard(QFrame):
+#     """Simple KPI card with title, value and optional status dot."""
+#     def __init__(self, title: str, value: str = "—", show_dot: bool = False, parent=None):
+#         super().__init__(parent)
+#         self.setFrameShape(QFrame.NoFrame)
+#         self.setObjectName("StatCard")
 
-        v = QVBoxLayout(self)
-        v.setContentsMargins(14, 12, 14, 12)
-        v.setSpacing(4)
+#         v = QVBoxLayout(self)
+#         v.setContentsMargins(14, 12, 14, 12)
+#         v.setSpacing(4)
 
-        top = QHBoxLayout()
-        top.setSpacing(8)
+#         top = QHBoxLayout()
+#         top.setSpacing(8)
 
-        self.titleLabel = CaptionLabel(title, self)
+#         self.titleLabel = CaptionLabel(title, self)
 
-        self.dot = QLabel(self)
-        self.dot.setFixedSize(10, 10)
-        self.dot.setVisible(show_dot)
-        self._dot_color = QColor(156, 163, 175)  # gray
-        self._apply_dot_color()
+#         self.dot = QLabel(self)
+#         self.dot.setFixedSize(10, 10)
+#         self.dot.setVisible(show_dot)
+#         self._dot_color = QColor(156, 163, 175)  # gray
+#         self._apply_dot_color()
 
-        top.addWidget(self.titleLabel)
-        top.addStretch(1)
-        if show_dot:
-            top.addWidget(self.dot)
+#         top.addWidget(self.titleLabel)
+#         top.addStretch(1)
+#         if show_dot:
+#             top.addWidget(self.dot)
 
-        self.valueLabel = BodyLabel(value, self)
-        self.valueLabel.setStyleSheet("font-size: 20px; font-weight: 600;")
+#         self.valueLabel = BodyLabel(value, self)
+#         self.valueLabel.setStyleSheet("font-size: 20px; font-weight: 600;")
 
-        v.addLayout(top)
-        v.addWidget(self.valueLabel)
+#         v.addLayout(top)
+#         v.addWidget(self.valueLabel)
 
-    def setValue(self, text: str):
-        self.valueLabel.setText(text)
+#     def setValue(self, text: str):
+#         self.valueLabel.setText(text)
 
-    def setDotColor(self, color: QColor):
-        self._dot_color = color
-        self._apply_dot_color()
+#     def setDotColor(self, color: QColor):
+#         self._dot_color = color
+#         self._apply_dot_color()
 
-    def _apply_dot_color(self):
-        c = self._dot_color
-        self.dot.setStyleSheet(
-            f"border-radius:5px; background: rgb({c.red()},{c.green()},{c.blue()});"
-        )
+#     def _apply_dot_color(self):
+#         c = self._dot_color
+#         self.dot.setStyleSheet(
+#             f"border-radius:5px; background: rgb({c.red()},{c.green()},{c.blue()});"
+#         )
 
-class DashboardPage(QWidget):
-    # Signals
-    startRequested = Signal()
-    stopRequested = Signal()
-    pauseToggle = Signal()
-    emergRequested = Signal()
-    pickChats = Signal()
-    qualityChanged = Signal(int)
+# class DashboardPage(QWidget):
+#     # Signals
+#     startRequested = Signal()
+#     stopRequested = Signal()
+#     pauseToggle = Signal()
+#     emergRequested = Signal()
+#     pickChats = Signal()
+#     qualityChanged = Signal(int)
     
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_window = parent
-        self.signal_count = 0
-        self.channel_count = 0
-        self.last_heartbeat = 0
-        self._setup_ui()
+#     def __init__(self, parent=None):
+#         super().__init__(parent)
+#         self.parent_window = parent
+#         self.signal_count = 0
+#         self.channel_count = 0
+#         self.last_heartbeat = 0
+#         self._setup_ui()
         
-        # Heartbeat checker timer
-        self.heartbeat_timer = QTimer(self)
-        self.heartbeat_timer.timeout.connect(self._check_heartbeat)
-        self.heartbeat_timer.start(1000)  # Check every second
+#         # Heartbeat checker timer
+#         self.heartbeat_timer = QTimer(self)
+#         self.heartbeat_timer.timeout.connect(self._check_heartbeat)
+#         self.heartbeat_timer.start(1000)  # Check every second
         
-    def _setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+#     def _setup_ui(self):
+#         layout = QVBoxLayout(self)
+#         layout.setContentsMargins(16, 16, 16, 16)
+#         layout.setSpacing(12)
         
-        # --- Top: status badges + actions
-        top = QHBoxLayout()
-        layout.addLayout(top)
+#         # --- Top: status badges + actions
+#         top = QHBoxLayout()
+#         layout.addLayout(top)
 
-        # Left: status cards
-        statusLayout = QVBoxLayout()
+#         # Left: status cards
+#         statusLayout = QVBoxLayout()
         
-        # Status cards grid
-        cardsLayout = QGridLayout()
-        cardsLayout.setHorizontalSpacing(12)
-        cardsLayout.setVerticalSpacing(10)
+#         # Status cards grid
+#         cardsLayout = QGridLayout()
+#         cardsLayout.setHorizontalSpacing(12)
+#         cardsLayout.setVerticalSpacing(10)
         
-        # Helper function to create cards with badges
-        def _makeCardWithBadge(title: str, initial_value: str = "Off", badge_type: str = "attension"):
-            card = QWidget()
-            card.setFixedHeight(80)
-            card.setStyleSheet("""
-                QWidget {
-                    background-color: rgba(255, 255, 255, 0.05);
-                    border: 1px solid rgba(255, 255, 255, 0.1);
-                    border-radius: 8px;
-                    padding: 8px;
-                }
-            """)
+#         # Helper function to create cards with badges
+#         def _makeCardWithBadge(title: str, initial_value: str = "Off", badge_type: str = "attension"):
+#             card = QWidget()
+#             card.setFixedHeight(80)
+#             card.setStyleSheet("""
+#                 QWidget {
+#                     background-color: rgba(255, 255, 255, 0.05);
+#                     border: 1px solid rgba(255, 255, 255, 0.1);
+#                     border-radius: 8px;
+#                     padding: 8px;
+#                 }
+#             """)
             
-            cardLayout = QVBoxLayout(card)
-            cardLayout.setContentsMargins(12, 8, 12, 8)
-            cardLayout.setSpacing(4)
+#             cardLayout = QVBoxLayout(card)
+#             cardLayout.setContentsMargins(12, 8, 12, 8)
+#             cardLayout.setSpacing(4)
             
-            # Title
-            titleLabel = BodyLabel(title)
-            titleLabel.setStyleSheet("color: #888; font-size: 12px;")
-            cardLayout.addWidget(titleLabel)
+#             # Title
+#             titleLabel = BodyLabel(title)
+#             titleLabel.setStyleSheet("color: #888; font-size: 12px;")
+#             cardLayout.addWidget(titleLabel)
             
-            # Badge container
-            badgeContainer = QWidget()
-            badgeLayout = QHBoxLayout(badgeContainer)
-            badgeLayout.setContentsMargins(0, 0, 0, 0)
-            badgeLayout.setSpacing(0)
+#             # Badge container
+#             badgeContainer = QWidget()
+#             badgeLayout = QHBoxLayout(badgeContainer)
+#             badgeLayout.setContentsMargins(0, 0, 0, 0)
+#             badgeLayout.setSpacing(0)
             
-            if badge_type == "attension":
-                badge = InfoBadge.attension(initial_value, badgeContainer)
-            elif badge_type == "success":
-                badge = InfoBadge.success(initial_value, badgeContainer)
-            else:
-                badge = InfoBadge.info(initial_value, badgeContainer)
+#             if badge_type == "attension":
+#                 badge = InfoBadge.attension(initial_value, badgeContainer)
+#             elif badge_type == "success":
+#                 badge = InfoBadge.success(initial_value, badgeContainer)
+#             else:
+#                 badge = InfoBadge.info(initial_value, badgeContainer)
             
-            badge.setStyleSheet("font-size: 14px; font-weight: bold;")
-            badgeLayout.addWidget(badge)
-            badgeLayout.addStretch()
+#             badge.setStyleSheet("font-size: 14px; font-weight: bold;")
+#             badgeLayout.addWidget(badge)
+#             badgeLayout.addStretch()
             
-            cardLayout.addWidget(badgeContainer)
-            cardLayout.addStretch()
+#             cardLayout.addWidget(badgeContainer)
+#             cardLayout.addStretch()
             
-            return card, badge
+#             return card, badge
         
-        # System Status Card
-        self.systemCard, self.statusBadge = _makeCardWithBadge("System Status", "Off", "attension")
+#         # System Status Card
+#         self.systemCard, self.statusBadge = _makeCardWithBadge("System Status", "Off", "attension")
         
-        # Signals Count Card  
-        self.signalsCard, self.signalsBadge = _makeCardWithBadge("Signals Processed", "0", "info")
+#         # Signals Count Card  
+#         self.signalsCard, self.signalsBadge = _makeCardWithBadge("Signals Processed", "0", "info")
         
-        # Channels Count Card
-        self.channelsCard, self.channelsBadge = _makeCardWithBadge("Active Channels", "0", "info")
+#         # Channels Count Card
+#         self.channelsCard, self.channelsBadge = _makeCardWithBadge("Active Channels", "0", "info")
         
-        # Heartbeat Card
-        self.heartbeatCard, self.heartbeatBadge = _makeCardWithBadge("EA Heartbeat", "—", "attension")
+#         # Heartbeat Card
+#         self.heartbeatCard, self.heartbeatBadge = _makeCardWithBadge("EA Heartbeat", "—", "attension")
         
-        cardsLayout.addWidget(self.systemCard, 0, 0)
-        cardsLayout.addWidget(self.signalsCard, 0, 1)
-        cardsLayout.addWidget(self.channelsCard, 1, 0)
-        cardsLayout.addWidget(self.heartbeatCard, 1, 1)
+#         cardsLayout.addWidget(self.systemCard, 0, 0)
+#         cardsLayout.addWidget(self.signalsCard, 0, 1)
+#         cardsLayout.addWidget(self.channelsCard, 1, 0)
+#         cardsLayout.addWidget(self.heartbeatCard, 1, 1)
         
-        # Slider under badges
-        sliderLay = QHBoxLayout()
-        self.qualityLabel = QLabel("Signal Quality ≥ 60", self)
-        self.qualitySlider = QSlider(Qt.Horizontal, self)
-        self.qualitySlider.setRange(0, 100)
-        self.qualitySlider.setValue(50)
-        self.qualitySlider.setTickInterval(10)
-        self.qualitySlider.setTickPosition(QSlider.TicksBelow)
-        sliderLay.addWidget(self.qualityLabel)
-        sliderLay.addWidget(self.qualitySlider, 1)
+#         # Slider under badges
+#         sliderLay = QHBoxLayout()
+#         self.qualityLabel = QLabel("Signal Quality ≥ 60", self)
+#         self.qualitySlider = QSlider(Qt.Horizontal, self)
+#         self.qualitySlider.setRange(0, 100)
+#         self.qualitySlider.setValue(50)
+#         self.qualitySlider.setTickInterval(10)
+#         self.qualitySlider.setTickPosition(QSlider.TicksBelow)
+#         sliderLay.addWidget(self.qualityLabel)
+#         sliderLay.addWidget(self.qualitySlider, 1)
 
-        statusLayout.addLayout(cardsLayout)
-        statusLayout.addLayout(sliderLay)
-        top.addLayout(statusLayout, 1)
+#         statusLayout.addLayout(cardsLayout)
+#         statusLayout.addLayout(sliderLay)
+#         top.addLayout(statusLayout, 1)
 
-        # Right: big actions
-        actWrap = QWidget(self)
-        act = QVBoxLayout(actWrap)
-        act.setSpacing(10)
+#         # Right: big actions
+#         actWrap = QWidget(self)
+#         act = QVBoxLayout(actWrap)
+#         act.setSpacing(10)
 
-        self.startBtn = PrimaryPushButton("START", self)
-        self.stopBtn  = PushButton("STOP", self); self.stopBtn.setEnabled(False)
-        self.pauseBtn = PushButton(FluentIcon.PAUSE, "Pause", self); self.pauseBtn.setEnabled(False)
-        self.emergBtn = PrimaryPushButton("EMERGENCY STOP", self); self.emergBtn.setEnabled(False)
-        for b in (self.startBtn, self.stopBtn, self.pauseBtn, self.emergBtn):
-            b.setMinimumHeight(44)
-            act.addWidget(b)
+#         self.startBtn = PrimaryPushButton("START", self)
+#         self.stopBtn  = PushButton("STOP", self); self.stopBtn.setEnabled(False)
+#         self.pauseBtn = PushButton(FluentIcon.PAUSE, "Pause", self); self.pauseBtn.setEnabled(False)
+#         self.emergBtn = PrimaryPushButton("EMERGENCY STOP", self); self.emergBtn.setEnabled(False)
+#         for b in (self.startBtn, self.stopBtn, self.pauseBtn, self.emergBtn):
+#             b.setMinimumHeight(44)
+#             act.addWidget(b)
 
-        self.pickBtn = PushButton(FluentIcon.PEOPLE, "Pick chats…", self); self.pickBtn.setEnabled(False)
-        act.addWidget(self.pickBtn)
-        act.addStretch(1)
+#         self.pickBtn = PushButton(FluentIcon.PEOPLE, "Pick chats…", self); self.pickBtn.setEnabled(False)
+#         act.addWidget(self.pickBtn)
+#         act.addStretch(1)
 
-        actWrap.setFixedWidth(280)
-        top.addWidget(actWrap)
+#         actWrap.setFixedWidth(280)
+#         top.addWidget(actWrap)
         
-        # Inline auth box
-        self.authBox = QWidget(self)
-        authLay = QHBoxLayout(self.authBox)
-        authLay.setContentsMargins(0, 0, 0, 0)
-        authLay.setSpacing(8)
-        self.authPrompt = SubtitleLabel("Enter the code you received:", self.authBox)
-        self.authEdit = LineEdit(self.authBox)
-        self.authEdit.setPlaceholderText("e.g. 12345")
-        self.authSubmit = PrimaryPushButton("Submit", self.authBox)
-        self.authCancel = PushButton("Cancel", self.authBox)
-        authLay.addWidget(self.authPrompt)
-        authLay.addWidget(self.authEdit, 1)
-        authLay.addWidget(self.authSubmit)
-        authLay.addWidget(self.authCancel)
-        self.authBox.setVisible(False)
-        layout.addWidget(self.authBox)
+#         # Inline auth box
+#         self.authBox = QWidget(self)
+#         authLay = QHBoxLayout(self.authBox)
+#         authLay.setContentsMargins(0, 0, 0, 0)
+#         authLay.setSpacing(8)
+#         self.authPrompt = SubtitleLabel("Enter the code you received:", self.authBox)
+#         self.authEdit = LineEdit(self.authBox)
+#         self.authEdit.setPlaceholderText("e.g. 12345")
+#         self.authSubmit = PrimaryPushButton("Submit", self.authBox)
+#         self.authCancel = PushButton("Cancel", self.authBox)
+#         authLay.addWidget(self.authPrompt)
+#         authLay.addWidget(self.authEdit, 1)
+#         authLay.addWidget(self.authSubmit)
+#         authLay.addWidget(self.authCancel)
+#         self.authBox.setVisible(False)
+#         layout.addWidget(self.authBox)
         
-        # --- Recent Signals Table
-        layout.addWidget(SubtitleLabel("Recent Signals"))
-        self.signalsTable = QTableWidget(self)
-        self.signalsTable.setColumnCount(6)
-        self.signalsTable.setHorizontalHeaderLabels(["Time", "Action", "Symbol", "Side", "Entry/Price", "Details"])
-        self.signalsTable.setMaximumHeight(150)
-        self.signalsTable.setMinimumHeight(120)
-        self.signalsTable.setAlternatingRowColors(True)
-        self.signalsTable.horizontalHeader().setStretchLastSection(True)
-        self.signalsTable.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.signalsTable.verticalHeader().setVisible(False)
-        header = self.signalsTable.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Time
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Action
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Symbol
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Side
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Entry/Price
-        header.setSectionResizeMode(5, QHeaderView.Stretch)           # Details fills the rest
-        layout.addWidget(self.signalsTable)
+#         # --- Recent Signals Table
+#         layout.addWidget(SubtitleLabel("Recent Signals"))
+#         self.signalsTable = QTableWidget(self)
+#         self.signalsTable.setColumnCount(6)
+#         self.signalsTable.setHorizontalHeaderLabels(["Time", "Action", "Symbol", "Side", "Entry/Price", "Details"])
+#         self.signalsTable.setMaximumHeight(150)
+#         self.signalsTable.setMinimumHeight(120)
+#         self.signalsTable.setAlternatingRowColors(True)
+#         self.signalsTable.horizontalHeader().setStretchLastSection(True)
+#         self.signalsTable.setSelectionBehavior(QAbstractItemView.SelectRows)
+#         self.signalsTable.verticalHeader().setVisible(False)
+#         header = self.signalsTable.horizontalHeader()
+#         header.setSectionResizeMode(QHeaderView.Interactive)
+#         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Time
+#         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Action
+#         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Symbol
+#         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Side
+#         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Entry/Price
+#         header.setSectionResizeMode(5, QHeaderView.Stretch)           # Details fills the rest
+#         layout.addWidget(self.signalsTable)
 
-        # --- Log
-        layout.addWidget(SubtitleLabel("Log"))
-        self.log = TextEdit(self)
-        self.log.setReadOnly(True)
-        self.log.setMinimumHeight(200)
-        self.log.setAcceptRichText(True)
-        self.log.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.log.customContextMenuRequested.connect(lambda p: self._logMenu(p))
-        layout.addWidget(self.log, 1)
+#         # --- Log
+#         layout.addWidget(SubtitleLabel("Log"))
+#         self.log = TextEdit(self)
+#         self.log.setReadOnly(True)
+#         self.log.setMinimumHeight(200)
+#         self.log.setAcceptRichText(True)
+#         self.log.setContextMenuPolicy(Qt.CustomContextMenu)
+#         self.log.customContextMenuRequested.connect(lambda p: self._logMenu(p))
+#         layout.addWidget(self.log, 1)
         
-        # Connect signals
-        self._connect_signals()
+#         # Connect signals
+#         self._connect_signals()
         
-    def _connect_signals(self):
-        self.startBtn.clicked.connect(self.startRequested.emit)
-        self.stopBtn.clicked.connect(self.stopRequested.emit)
-        self.pauseBtn.clicked.connect(self.pauseToggle.emit)
-        self.emergBtn.clicked.connect(self.emergRequested.emit)
-        self.pickBtn.clicked.connect(self.pickChats.emit)
+#     def _connect_signals(self):
+#         self.startBtn.clicked.connect(self.startRequested.emit)
+#         self.stopBtn.clicked.connect(self.stopRequested.emit)
+#         self.pauseBtn.clicked.connect(self.pauseToggle.emit)
+#         self.emergBtn.clicked.connect(self.emergRequested.emit)
+#         self.pickBtn.clicked.connect(self.pickChats.emit)
         
-        self.qualitySlider.valueChanged.connect(
-            lambda v: self.qualityLabel.setText(f"Signal Quality ≥ {v}")
-        )
-        self.qualitySlider.valueChanged.connect(self.qualityChanged.emit)
+#         self.qualitySlider.valueChanged.connect(
+#             lambda v: self.qualityLabel.setText(f"Signal Quality ≥ {v}")
+#         )
+#         self.qualitySlider.valueChanged.connect(self.qualityChanged.emit)
         
-        self.authSubmit.clicked.connect(self._submitAuth)
-        self.authCancel.clicked.connect(self._cancelAuth)
+#         self.authSubmit.clicked.connect(self._submitAuth)
+#         self.authCancel.clicked.connect(self._cancelAuth)
         
-    def _logMenu(self, pos):
-        menu = self.log.createStandardContextMenu()
-        menu.addSeparator()
-        act = menu.addAction("Clear log")
-        act.triggered.connect(self.log.clear)
-        menu.exec(self.log.mapToGlobal(pos))
+#     def _logMenu(self, pos):
+#         menu = self.log.createStandardContextMenu()
+#         menu.addSeparator()
+#         act = menu.addAction("Clear log")
+#         act.triggered.connect(self.log.clear)
+#         menu.exec(self.log.mapToGlobal(pos))
             
-    def _submitAuth(self):
-        if self.parent_window:
-            self.parent_window._submitAuth()
+#     def _submitAuth(self):
+#         if self.parent_window:
+#             self.parent_window._submitAuth()
             
-    def _cancelAuth(self):
-        if self.parent_window:
-            self.parent_window._cancelAuth()
+#     def _cancelAuth(self):
+#         if self.parent_window:
+#             self.parent_window._cancelAuth()
 
-    def _check_heartbeat(self):
-        """Check heartbeat and update indicator"""
-        if not self.parent_window or not self.parent_window.thread:
-            self.heartbeatBadge.setText("—")
-            self.heartbeatBadge.setColor(QColor(128, 128, 128))  # Gray
-            return
+#     def _check_heartbeat(self):
+#         """Check heartbeat and update indicator"""
+#         if not self.parent_window or not self.parent_window.thread:
+#             self.heartbeatBadge.setText("—")
+#             self.heartbeatBadge.setColor(QColor(128, 128, 128))  # Gray
+#             return
             
-        try:
-            if hasattr(self.parent_window.thread, 'heartbeat_file') and self.parent_window.thread.heartbeat_file:
-                if self.parent_window.thread.heartbeat_file.exists():
-                    hb_time = int(self.parent_window.thread.heartbeat_file.read_text().strip())
-                    current_time = int(time.time())
-                    diff = current_time - hb_time
+#         try:
+#             if hasattr(self.parent_window.thread, 'heartbeat_file') and self.parent_window.thread.heartbeat_file:
+#                 if self.parent_window.thread.heartbeat_file.exists():
+#                     hb_time = int(self.parent_window.thread.heartbeat_file.read_text().strip())
+#                     current_time = int(time.time())
+#                     diff = current_time - hb_time
                     
-                    if diff > 15:  # More than 15 seconds
-                        self.heartbeatBadge.setText("Dead")
-                        self.heartbeatBadge.setColor(QColor(239, 68, 68))  # Red
-                    else:
-                        self.heartbeatBadge.setText("OK")
-                        self.heartbeatBadge.setColor(QColor(34, 197, 94))  # Green
-                else:
-                    self.heartbeatBadge.setText("No file")
-                    self.heartbeatBadge.setColor(QColor(251, 146, 60))  # Orange
-        except Exception:
-            self.heartbeatBadge.setText("Error")
-            self.heartbeatBadge.setColor(QColor(239, 68, 68))  # Red
+#                     if diff > 15:  # More than 15 seconds
+#                         self.heartbeatBadge.setText("Dead")
+#                         self.heartbeatBadge.setColor(QColor(239, 68, 68))  # Red
+#                     else:
+#                         self.heartbeatBadge.setText("OK")
+#                         self.heartbeatBadge.setColor(QColor(34, 197, 94))  # Green
+#                 else:
+#                     self.heartbeatBadge.setText("No file")
+#                     self.heartbeatBadge.setColor(QColor(251, 146, 60))  # Orange
+#         except Exception:
+#             self.heartbeatBadge.setText("Error")
+#             self.heartbeatBadge.setColor(QColor(239, 68, 68))  # Red
     
-    def addSignalToTable(self, signal_data: dict):
-        """Add a new signal record to the table"""
-        # Keep only last 20 records
-        if self.signalsTable.rowCount() >= 20:
-            self.signalsTable.removeRow(0)
+#     def addSignalToTable(self, signal_data: dict):
+#         """Add a new signal record to the table"""
+#         # Keep only last 20 records
+#         if self.signalsTable.rowCount() >= 20:
+#             self.signalsTable.removeRow(0)
 
-        row = self.signalsTable.rowCount()
-        self.signalsTable.insertRow(row)
+#         row = self.signalsTable.rowCount()
+#         self.signalsTable.insertRow(row)
 
-        # Format timestamp
-        timestamp = signal_data.get('t', int(time.time()))
-        time_str = time.strftime('%H:%M:%S', time.localtime(timestamp))
+#         # Format timestamp
+#         timestamp = signal_data.get('t', int(time.time()))
+#         time_str = time.strftime('%H:%M:%S', time.localtime(timestamp))
 
-        action = signal_data.get('action', '')
-        symbol = signal_data.get('symbol', '')
-        side = signal_data.get('side', '')
+#         action = signal_data.get('action', '')
+#         symbol = signal_data.get('symbol', '')
+#         side = signal_data.get('side', '')
 
-        # Format entry/price based on action
-        entry_price = ""
-        details = ""
+#         # Format entry/price based on action
+#         entry_price = ""
+#         details = ""
 
-        if action == "OPEN":
-            order_type = signal_data.get('order_type', 'MARKET')
-            entry = signal_data.get('entry')
-            entry_ref = signal_data.get('entry_ref')
+#         if action == "OPEN":
+#             order_type = signal_data.get('order_type', 'MARKET')
+#             entry = signal_data.get('entry')
+#             entry_ref = signal_data.get('entry_ref')
 
-            if order_type == "MARKET":
-                entry_price = f"MARKET ({entry_ref})" if entry_ref else "MARKET"
-            else:
-                entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
+#             if order_type == "MARKET":
+#                 entry_price = f"MARKET ({entry_ref})" if entry_ref else "MARKET"
+#             else:
+#                 entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
 
-            sl = signal_data.get('sl')
-            tps = signal_data.get('tps', [])  # Get all TPs as list
+#             sl = signal_data.get('sl')
+#             tps = signal_data.get('tps', [])  # Get all TPs as list
 
-            details_parts = []
-            if sl:
-                details_parts.append(f"SL: {sl}")
-            if tps:
-                # Show all TPs in format: TP1: 203.0, TP2: 204.0, TP3: 205.0
-                tp_details = []
-                for i, tp_value in enumerate(tps, 1):
-                    tp_details.append(f"TP{i}: {tp_value}")
-                details_parts.append(", ".join(tp_details))
-            details = " | ".join(details_parts)
+#             details_parts = []
+#             if sl:
+#                 details_parts.append(f"SL: {sl}")
+#             if tps:
+#                 # Show all TPs in format: TP1: 203.0, TP2: 204.0, TP3: 205.0
+#                 tp_details = []
+#                 for i, tp_value in enumerate(tps, 1):
+#                     tp_details.append(f"TP{i}: {tp_value}")
+#                 details_parts.append(", ".join(tp_details))
+#             details = " | ".join(details_parts)
 
-        elif action == "CLOSE":
-            entry_price = "Market Close"
-            details = f"OID: {signal_data.get('oid', '')}"
+#         elif action == "CLOSE":
+#             entry_price = "Market Close"
+#             details = f"OID: {signal_data.get('oid', '')}"
 
-        elif action == "MODIFY":
-            new_sl = signal_data.get('new_sl')
-            new_tps = signal_data.get('new_tps_csv', '')
-            details_parts = []
-            if new_sl:
-                details_parts.append(f"New SL: {new_sl}")
-            if new_tps:
-                details_parts.append(f"New TPs: {new_tps}")
-            details = " | ".join(details_parts)
+#         elif action == "MODIFY":
+#             new_sl = signal_data.get('new_sl')
+#             new_tps = signal_data.get('new_tps_csv', '')
+#             details_parts = []
+#             if new_sl:
+#                 details_parts.append(f"New SL: {new_sl}")
+#             if new_tps:
+#                 details_parts.append(f"New TPs: {new_tps}")
+#             details = " | ".join(details_parts)
 
-        elif action == "MODIFY_TP":
-            tp_slot = signal_data.get('tp_slot', 1)
-            tp_to = signal_data.get('tp_to')
-            details = f"TP{tp_slot} → {tp_to}"
+#         elif action == "MODIFY_TP":
+#             tp_slot = signal_data.get('tp_slot', 1)
+#             tp_to = signal_data.get('tp_to')
+#             details = f"TP{tp_slot} → {tp_to}"
 
-        elif action == "EMERGENCY_CLOSE_ALL":
-            entry_price = "EMERGENCY"
-            details = "Close all positions"
-            side = ""
+#         elif action == "EMERGENCY_CLOSE_ALL":
+#             entry_price = "EMERGENCY"
+#             details = "Close all positions"
+#             side = ""
 
-        # Set table items
-        self.signalsTable.setItem(row, 0, QTableWidgetItem(time_str))
-        self.signalsTable.setItem(row, 1, QTableWidgetItem(action))
-        self.signalsTable.setItem(row, 2, QTableWidgetItem(symbol))
-        self.signalsTable.setItem(row, 3, QTableWidgetItem(side))
-        self.signalsTable.setItem(row, 4, QTableWidgetItem(entry_price))
-        self.signalsTable.setItem(row, 5, QTableWidgetItem(details))
+#         # Set table items
+#         self.signalsTable.setItem(row, 0, QTableWidgetItem(time_str))
+#         self.signalsTable.setItem(row, 1, QTableWidgetItem(action))
+#         self.signalsTable.setItem(row, 2, QTableWidgetItem(symbol))
+#         self.signalsTable.setItem(row, 3, QTableWidgetItem(side))
+#         self.signalsTable.setItem(row, 4, QTableWidgetItem(entry_price))
+#         self.signalsTable.setItem(row, 5, QTableWidgetItem(details))
     
-        # Color coding by action
-        action_colors = {
-            "OPEN": QColor(34, 197, 94, 50),      # Green
-            "CLOSE": QColor(239, 68, 68, 50),     # RedaddSignalToTable
-            "MODIFY": QColor(59, 130, 246, 50),   # Blue
-            "MODIFY_TP": QColor(147, 51, 234, 50), # Purple
-            "EMERGENCY_CLOSE_ALL": QColor(220, 38, 127, 50)  # Pink
-        }
+#         # Color coding by action
+#         action_colors = {
+#             "OPEN": QColor(34, 197, 94, 50),      # Green
+#             "CLOSE": QColor(239, 68, 68, 50),     # RedaddSignalToTable
+#             "MODIFY": QColor(59, 130, 246, 50),   # Blue
+#             "MODIFY_TP": QColor(147, 51, 234, 50), # Purple
+#             "EMERGENCY_CLOSE_ALL": QColor(220, 38, 127, 50)  # Pink
+#         }
 
-        color = action_colors.get(action, QColor(156, 163, 175, 50))
-        for col in range(6):
-            item = self.signalsTable.item(row, col)
-            if item:
-                item.setBackground(color)
+#         color = action_colors.get(action, QColor(156, 163, 175, 50))
+#         for col in range(6):
+#             item = self.signalsTable.item(row, col)
+#             if item:
+#                 item.setBackground(color)
 
-        # Scroll to bottom
-        self.signalsTable.scrollToBottom()
+#         # Scroll to bottom
+#         self.signalsTable.scrollToBottom()
 
-        # Update signals count
-        self.signal_count += 1
-        self.signalsBadge.setText(str(self.signal_count))
+#         # Update signals count
+#         self.signal_count += 1
+#         self.signalsBadge.setText(str(self.signal_count))
 
-    # convenience helpers used by MainWindow
-    def setRunning(self, running: bool) -> None:
-        is_running = bool(running)             # keep the original meaning clear
+#     # convenience helpers used by MainWindow
+#     def setRunning(self, running: bool) -> None:
+#         is_running = bool(running)             # keep the original meaning clear
 
-        self.startBtn.setEnabled(not is_running)
-        self.stopBtn.setEnabled(is_running)
-        self.pauseBtn.setEnabled(is_running)
-        self.emergBtn.setEnabled(is_running)
-        self.pickBtn.setEnabled(is_running)
+#         self.startBtn.setEnabled(not is_running)
+#         self.stopBtn.setEnabled(is_running)
+#         self.pauseBtn.setEnabled(is_running)
+#         self.emergBtn.setEnabled(is_running)
+#         self.pickBtn.setEnabled(is_running)
         
-        # Update status badge
-        if is_running:
-            self.statusBadge.setText("On")
-            self.statusBadge.setColor(QColor(34, 197, 94))  # Green
-        else:
-            self.statusBadge.setText("Off")
-            self.statusBadge.setColor(QColor(156, 163, 175))  # Gray
+#         # Update status badge
+#         if is_running:
+#             self.statusBadge.setText("On")
+#             self.statusBadge.setColor(QColor(34, 197, 94))  # Green
+#         else:
+#             self.statusBadge.setText("Off")
+#             self.statusBadge.setColor(QColor(156, 163, 175))  # Gray
             
-    def updateChannelCount(self, count: int):
-        """Update the channels count badge"""
-        self.channel_count = count
-        self.channelsBadge.setText(str(count))
+#     def updateChannelCount(self, count: int):
+#         """Update the channels count badge"""
+#         self.channel_count = count
+#         self.channelsBadge.setText(str(count))
 
 class StatCard(QFrame):
     """Small card with a title, big value, and optional status dot."""
@@ -1780,22 +1773,18 @@ class DashboardPage(QWidget):
 
             if order_type == "MARKET":
                 entry_price = f"MARKET ({entry_ref})" if entry_ref else "MARKET"
-        else:
-            entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
-            
-        sl = signal_data.get('sl')
-        tps = signal_data.get('tps', [])  # Get all TPs as list
-        
-        details_parts = []
-        if sl:
-            details_parts.append(f"SL: {sl}")
-        if tps:
-            # Show all TPs in format: TP1: 203.0, TP2: 204.0, TP3: 205.0
-            tp_details = []
-            for i, tp_value in enumerate(tps, 1):
-                tp_details.append(f"TP{i}: {tp_value}")
-            details_parts.append(", ".join(tp_details))
-            details = " | ".join(details_parts)
+            else:
+                entry_price = f"{order_type} @ {entry}" if entry is not None else order_type
+
+            sl = signal_data.get('sl')
+            tps = signal_data.get('tps', []) or []
+
+            parts = []
+            if sl is not None:
+                parts.append(f"SL: {sl}")
+            if tps:
+                parts.append(", ".join(f"TP{i}: {v}" for i, v in enumerate(tps, 1)))
+            details = " | ".join(parts)
 
         elif action == "CLOSE":
             entry_price = "Market Close"
@@ -1805,8 +1794,10 @@ class DashboardPage(QWidget):
             new_sl = signal_data.get("new_sl")
             new_tps = signal_data.get("new_tps_csv", "")
             parts = []
-            if new_sl: parts.append(f"New SL: {new_sl}")
-            if new_tps: parts.append(f"New TPs: {new_tps}")
+            if new_sl is not None:
+                parts.append(f"New SL: {new_sl}")
+            if new_tps:
+                parts.append(f"New TPs: {new_tps}")
             details = " | ".join(parts)
 
         elif action == "MODIFY_TP":
@@ -2115,46 +2106,26 @@ class MainWindow(QWidget):
             "STOPPED": "#6B7280",
             "COUNTER": "#84CC16",
         }
-
         aliases = {"WARNING": "WARN", "ERR": "ERROR"}
-        msg = strip_ansi(line or "")
-        tag = "INFO"
 
-        m = re.match(r'^\[([A-Za-z]+)]\s*(.*)$', msg.strip())
+        msg = strip_ansi(line or "").strip()
+        tag = "INFO"
+        m = re.match(r'^\[([A-Za-z]+)]\s*(.*)$', msg)
         if m:
             tag = aliases.get(m.group(1).upper(), m.group(1).upper())
             msg = m.group(2)
-        else:
-            low = msg.lower()
-            if "error" in low:
-                tag = "ERROR"
-            elif "warn" in low:
-                tag = "WARN"
-                # ---- UI side-effects -------------------------------------------------
-                # When SCAN logs "...Cached N chats...", update Channels card with TRACKED count only
+
+        # side-effect: keep the tracked count in sync on SCAN lines
         if tag == "SCAN":
             try:
-                # More robust pattern matching
-                patterns = [
-                    r'Cached\s+(\d+)\s+chats',
-                    r'Prefetched\s+(\d+)\s+chats', 
-                    r'Found\s+(\d+)\s+chats'
-                ]
-                for pattern in patterns:
-                    mm = re.search(pattern, msg, re.IGNORECASE)
-                    if mm:
-                        # Update with the actual number of TRACKED channels, not total
-                        tracked_count = len(self._watched_list())
-                        self.dashboard.updateChannelCount(tracked_count)
-                        break
+                self.dashboard.updateChannelCount(len(self._watched_list()))
             except Exception:
                 pass
-                # ---- Pretty HTML log -------------------------------------------------
+
         color = colors.get(tag, "#6B7280")
         badge = (
-            f'<span style="background-color:{color};'
-            f' color:white; border-radius:8px; padding:1px 8px;'
-            f' font-weight:600; font-family:Segoe UI, system-ui, -apple-system;">{escape(tag)}</span>'
+            f'<span style="background-color:{color}; color:white; border-radius:8px;'
+            f' padding:1px 8px; font-weight:600; font-family:Segoe UI, system-ui;">{escape(tag)}</span>'
         )
         safe_msg = escape(msg).replace("\n", "<br>")
         html = f'<div style="margin:2px 0;">{badge}&nbsp;&nbsp;<span style="white-space:pre-wrap;">{safe_msg}</span></div>'
