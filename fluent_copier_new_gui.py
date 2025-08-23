@@ -2091,16 +2091,8 @@ class MainWindow(QWidget):
                 tag = "WARN"
     
         # ---- UI side-effects -------------------------------------------------
-        # 1) When thread logs a WRITE, pull the last record from JSONL and push it to the table.
-        #if tag == "WRITE":
-        #    rec = self._read_last_signal_record()
-        #    if rec:
-        #        try:
-        #            self.dashboard.addSignalToTable(rec)  # this updates the Signals card count too
-        #        except Exception:
-        #            pass
-    
-        # 2) When SCAN logs “…Cached N chats…”, update Channels card.
+
+        # When SCAN logs “…Cached N chats…”, update Channels card.
         if tag == "SCAN":
             try:
                 # More robust pattern matching
