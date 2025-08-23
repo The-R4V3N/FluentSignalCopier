@@ -23,6 +23,7 @@ A production-ready bridge that reads trading signals from **Telegram** and execu
 ## User interface Dashboard
 
 ![FluentSignalCopier GUI Home](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home.png)
+![FluentSignalCopier GUI Home](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home_with_log.png)
 
 ## User interface Settings
 
