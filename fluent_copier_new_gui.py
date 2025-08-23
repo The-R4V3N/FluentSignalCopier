@@ -1233,7 +1233,7 @@ class DashboardPage(QWidget):
         
         # Slider under badges
         sliderLay = QHBoxLayout()
-        self.qualityLabel = QLabel("Signal Quality ≥ 50", self)
+        self.qualityLabel = QLabel("Signal Quality ≥ 60", self)
         self.qualitySlider = QSlider(Qt.Horizontal, self)
         self.qualitySlider.setRange(0, 100)
         self.qualitySlider.setValue(50)
@@ -1599,10 +1599,10 @@ class DashboardPage(QWidget):
 
         # Quality slider under the cards
         sliderRow = QHBoxLayout()
-        self.qualityLabel = QLabel("Signal Quality ≥ 50", self)
+        self.qualityLabel = QLabel("Signal Quality ≥ 60", self)
         self.qualitySlider = QSlider(Qt.Horizontal, self)
         self.qualitySlider.setRange(0, 100)
-        self.qualitySlider.setValue(50)
+        self.qualitySlider.setValue(60)
         self.qualitySlider.setTickInterval(10)
         self.qualitySlider.setTickPosition(QSlider.TicksBelow)
         sliderRow.addWidget(self.qualityLabel)
