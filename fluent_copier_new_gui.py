@@ -532,6 +532,7 @@ class CopierThread(QThread):
     authPwdNeeded = Signal()
     runningState = Signal(bool)
     dialogsReady = Signal(list)
+    signalProcessed = Signal(dict)
 
     def __init__(self, cfg: AppConfig, parent=None):
         super().__init__(parent)
@@ -1040,10 +1041,9 @@ class CopierThread(QThread):
             f.write(json.dumps(record, ensure_ascii=True) + "\n")
             f.flush()
             os.fsync(f.fileno())
-        
-        # Notify UI to update table
-        if hasattr(self.parent(), 'dashboard'):
-            self.parent().dashboard.add_signal_to_table(record)
+
+        # Emit the signal data directly instead of making UI read from file
+        self.signalProcessed.emit(record)
 
     async def _prefetch_dialogs(self, limit: int = 400):
         """Prefetch dialogs for quick access."""
@@ -2015,6 +2015,41 @@ class MainWindow(QWidget):
 
     def _tickUi(self):
         pass
+    
+    def _read_last_signal_record(self):
+        """Return the last non-empty JSON object from the signal JSONL file, or None."""
+        try:
+            if not self.thread or not getattr(self.thread, "signal_file", None):
+                return None
+            path = self.thread.signal_file
+            if not path.exists() or path.stat().st_size == 0:
+                return None
+
+            # Efficient-ish tail: read from end in chunks until we see a newline
+            with path.open("rb") as f:
+                f.seek(0, os.SEEK_END)
+                pos = f.tell()
+                buf = bytearray()
+                block = 1024
+                while pos > 0:
+                    read = block if pos >= block else pos
+                    pos -= read
+                    f.seek(pos, os.SEEK_SET)
+                    buf[:0] = f.read(read)
+                    if b"\n" in buf:
+                        break
+                # split and take the last non-empty line
+                lines = bytes(buf).splitlines()
+                for line in reversed(lines):
+                    s = line.strip()
+                    if s:
+                        try:
+                            return json.loads(s.decode("utf-8", "ignore"))
+                        except Exception:
+                            return None
+        except Exception:
+            return None
+        return None
 
     # --- UI helpers ---------------------------------------------------
     def toast(self, title: str, content: str, success: bool = False):
@@ -2025,24 +2060,25 @@ class MainWindow(QWidget):
         )
 
     def _appendLog(self, line: str):
-        """Log formatting with colors and badges"""
+        """Rich log + side-effects for dashboard (signals table & counters)."""
         colors = {
-            "ERROR":   "#EF4444",  # red
-            "WARN":    "#F59E0B",  # amber
-            "INFO":    "#3B82F6",  # blue
-            "NEW":     "#7C3AED",  # purple
-            "WRITE":   "#10B981",  # green
-            "PARSE":   "#F97316",  # orange
-            "AUTH":    "#06B6D6",  # cyan
-            "RUN":     "#6366F1",  # indigo
-            "SCAN":    "#14B8A6",  # teal
-            "STOPPED": "#6B7280",  # gray
-            "COUNTER": "#84CC16",  # lime
+            "ERROR":   "#EF4444",
+            "WARN":    "#F59E0B",
+            "INFO":    "#3B82F6",
+            "NEW":     "#7C3AED",
+            "WRITE":   "#10B981",
+            "PARSE":   "#F97316",
+            "AUTH":    "#06B6D6",
+            "RUN":     "#6366F1",
+            "SCAN":    "#14B8A6",
+            "STOPPED": "#6B7280",
+            "COUNTER": "#84CC16",
         }
         aliases = {"WARNING": "WARN", "ERR": "ERROR"}
-
+    
+        msg = strip_ansi(line or "")
         tag = "INFO"
-        msg = strip_ansi(line)
+    
         m = re.match(r'^\[([A-Za-z]+)]\s*(.*)$', msg.strip())
         if m:
             tag = aliases.get(m.group(1).upper(), m.group(1).upper())
@@ -2053,7 +2089,35 @@ class MainWindow(QWidget):
                 tag = "ERROR"
             elif "warn" in low:
                 tag = "WARN"
+    
+        # ---- UI side-effects -------------------------------------------------
+        # 1) When thread logs a WRITE, pull the last record from JSONL and push it to the table.
+        #if tag == "WRITE":
+        #    rec = self._read_last_signal_record()
+        #    if rec:
+        #        try:
+        #            self.dashboard.addSignalToTable(rec)  # this updates the Signals card count too
+        #        except Exception:
+        #            pass
+    
+        # 2) When SCAN logs “…Cached N chats…”, update Channels card.
+        if tag == "SCAN":
+            try:
+                # More robust pattern matching
+                patterns = [
+                    r'Cached\s+(\d+)\s+chats',
+                    r'Prefetched\s+(\d+)\s+chats', 
+                    r'Found\s+(\d+)\s+chats'
+                ]
+                for pattern in patterns:
+                    mm = re.search(pattern, msg, re.IGNORECASE)
+                    if mm:
+                        self.dashboard.updateChannelCount(int(mm.group(1)))
+                        break
+            except Exception:
+                pass
 
+        # ---- Pretty HTML log -------------------------------------------------
         color = colors.get(tag, "#6B7280")
         badge = (
             f'<span style="background-color:{color};'
@@ -2134,6 +2198,7 @@ class MainWindow(QWidget):
         self.thread.authPwdNeeded.connect(self._onAuthPwdNeeded)
         self.thread.runningState.connect(self._onRunningState)
         self.thread.dialogsReady.connect(self.onDialogsReady)
+        self.thread.signalProcessed.connect(self._add_to_table)
 
         self.thread.set_quality_threshold(self.dashboard.qualitySlider.value())
         self.thread.start()

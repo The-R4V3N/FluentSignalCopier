@@ -3,6 +3,23 @@
 
 ## [0.11.0] - 2025-08-23
 
+📓 Changelog
+
+UI Dashboard (fix)
+
+- Unified table update method: addSignalToTable (camelCase).
+- Fixed signals counter badge not updating when new trades were received.
+
+CopierThread
+
+- Changed _write_signal to notify the UI through MainWindow._add_to_table instead of accessing the dashboard directly.
+- Ensured all signal kinds (OPEN, CLOSE, MODIFY, MODIFY_TP, EMERGENCY_CLOSE_ALL) update both the file and the UI.
+
+MainWindow
+
+- Added _add_to_table() as a compatibility shim (calls dashboard.addSignalToTable).
+- Emergency Stop now also updates the signals table via _add_to_table.
+
 Changelog (GUI refresh)
 Added
 
