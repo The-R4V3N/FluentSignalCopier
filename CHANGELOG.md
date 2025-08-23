@@ -1,6 +1,54 @@
 <!-- markdownlint-disable MD024 -->
 # Changelog
 
+Changelog — 0.12.0
+Added
+
+- Order‑type routing: EA honors order_type in JSON (MARKET / LIMIT / STOP). Market orders ignore entry value; pendings use it.
+- Multi‑TP legs: One signal can open multiple positions (per TP). Each leg gets a compact comment tag.
+- Break‑even triggers: _BE_TRG=<price> embedded in the first leg’s comment; EA auto‑moves SL→BE once reached.
+- Per‑channel sequencing: Last processed ID tracked via MT5 Global Variables, preventing cross‑chat replays.
+- Per‑symbol last OPEN id: Used by CLOSE signals when oid is omitted.
+- Heartbeat monitor: EA reads fluent_heartbeat.txt and warns on stale GUI; optional popups/sounds.
+- Position snapshots: EA writes positions_snapshot.json periodically for the GUI dashboard.
+- Safety caps: Symbol‑class limits (FX/metal/oil/index/crypto) and absolute $ risk cap.
+- Sound cues: Configurable alerts for OPEN / CLOSE / EMERGENCY.
+
+New GUI (PySide6 + QFluentWidgets):
+
+- Home dashboard with live heartbeat dot, recent‑signal table, and counters.
+- Signal quality slider (confidence gate).
+- Chat Picker (fetch dialogs, filter & add).
+- Pause intake and Emergency STOP buttons.
+- Auto‑detect MT5 MQL5\Files paths.
+- Rich, color‑tagged log; inline auth prompts (code/2FA).
+
+Parser upgrades:
+
+- Robust symbol aliases (XAU/GOLD, USOIL/WTI, DE40, SPX500, etc.).
+- Detects LIMIT/STOP headers (#XAUUSD BUY LIMIT @ …) and “BUY/SELL NOW”.
+- Extracts SL/TP lines in messy formats; collects multi‑TP; BE hint (“SL to entry at TP1”).
+- New MODIFY_TP action (TP slot moves).
+
+Changed
+
+- Position comments reworked (compact 31‑char safe): SRC|OID=<id>|GID=<gid> with a 6‑char source tag for quick provenance.
+- Risk sizing defaults: use risk_percent if present; otherwise fall back to EA input with dollar hard‑cap.
+- Cleaner, defensive file I/O (JSONL line writer; heartbeat write/flush on each event).
+
+Fixed
+
+- Undeclared identifiers / enum issues in EA (e.g., gid name clash & DEAL_REASON_* handling).
+- Safer JSON string escaping in EA.
+- Duplicate/rapid Telegram events suppressed (GUI de‑dupe window).
+- Graceful reconnect & shutdown in GUI (cancels heartbeat task; closes client).
+
+Notes / Compatibility
+
+- JSONL schema is backwards‑compatible for existing OPEN/CLOSE/MODIFY.
+- New optional fields the EA understands: order_type, entry (only for LIMIT/STOP), be_on_tp, tps/tps_csv.
+- No changes required to your MT5 symbols other than ensuring they’re visible in Market Watch.
+
 ## [0.11.0] - 2025-08-23
 
 📓 Changelog

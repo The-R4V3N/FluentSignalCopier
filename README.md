@@ -1,4 +1,4 @@
-# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.11.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
+# FluentSignalCopier ![Version](https://img.shields.io/badge/version-v0.12.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
 
 A production-ready bridge that reads trading signals from **Telegram** and executes them in **MetaTrader 5** via an Expert Advisor (EA).
 

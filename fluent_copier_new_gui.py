@@ -1573,6 +1573,253 @@ class SettingsPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
 
+class HistoryPage(QWidget):
+    """Trading History & Channel Performance"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_window = parent
+
+        # raw events buffer (bounded)
+        self.max_events = 2000
+        self.events: list[dict] = []
+
+        # per-channel stats
+        self.stats: dict[str, dict] = {}  # channel -> metrics dict
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(10)
+
+        # --- Channel selector (filter) ---
+        row = QHBoxLayout()
+        row.addWidget(SubtitleLabel("Trading History"))
+        row.addStretch(1)
+        row.addWidget(BodyLabel("Filter by channel:"))
+        self.channelFilter = LineEdit(self)
+        self.channelFilter.setPlaceholderText("Type to filter (leave empty for all)")
+        row.addWidget(self.channelFilter, 0)
+        root.addLayout(row)
+
+        # --- Channel performance table ---
+        root.addWidget(SubtitleLabel("Channel Performance"))
+        self.summaryTable = QTableWidget(self)
+        self.summaryTable.setColumnCount(7)
+        self.summaryTable.setHorizontalHeaderLabels(
+            ["Channel", "Signal Score", "Win %", "Opens", "Closes", "Avg Conf", "Last Signal"]
+        )
+        self.summaryTable.verticalHeader().setVisible(False)
+        self.summaryTable.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.summaryTable.horizontalHeader().setStretchLastSection(True)
+        self.summaryTable.setSortingEnabled(True)
+        root.addWidget(self.summaryTable)
+
+        # --- History table ---
+        root.addWidget(SubtitleLabel("Recent Signals / Trades"))
+        self.historyTable = QTableWidget(self)
+        self.historyTable.setColumnCount(8)
+        self.historyTable.setHorizontalHeaderLabels(
+            ["Time", "Channel", "Action", "Symbol", "Side", "Price", "Details", "Profit"]
+        )
+        self.historyTable.verticalHeader().setVisible(False)
+        self.historyTable.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.historyTable.horizontalHeader().setStretchLastSection(True)
+        self.historyTable.setAlternatingRowColors(True)
+        root.addWidget(self.historyTable, 1)
+
+        # wire filter
+        self.channelFilter.textChanged.connect(self._refresh_tables)
+
+    # ---------- public API ----------
+    def ingest_existing_file(self, path: Path, max_lines: int = 1200):
+        """Load recent JSONL records from file at startup."""
+        if not path or not path.exists():
+            return
+        try:
+            # Read tail quickly
+            with path.open("rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                chunk = min(size, 512 * 1024)
+                f.seek(size - chunk)
+                data = f.read().decode("utf-8", "ignore")
+            lines = [ln.strip() for ln in data.splitlines() if ln.strip()][-max_lines:]
+            for ln in lines:
+                try:
+                    rec = json.loads(ln)
+                except Exception:
+                    continue
+                self.on_signal(rec, update_ui=False)
+            self._refresh_tables()
+        except Exception:
+            pass
+
+    def on_signal(self, rec: dict, update_ui: bool = True):
+        """Feed a single new signal/trade record."""
+        # keep bounded buffer
+        self.events.append(rec)
+        if len(self.events) > self.max_events:
+            self.events = self.events[-self.max_events:]
+
+        ch = rec.get("source", "") or ""
+        act = rec.get("action", "")
+        conf = float(rec.get("confidence", 0) or 0)
+        ts = int(rec.get("t", time.time()))
+        sym = rec.get("symbol") or ""
+        side = rec.get("side") or ""
+        profit = rec.get("profit")  # may be provided by EA on CLOSE; optional
+
+        # init channel bucket
+        st = self.stats.setdefault(ch, {
+            "opens": 0, "closes": 0, "mods": 0,
+            "win": 0, "loss": 0, "draw": 0,
+            "conf_sum": 0.0, "conf_n": 0,
+            "last_ts": 0
+        })
+
+        if act == "OPEN":
+            st["opens"] += 1
+            st["conf_sum"] += conf
+            st["conf_n"] += 1
+        elif act == "CLOSE":
+            st["closes"] += 1
+            # If EA writes profit into the record we can compute win/loss
+            if isinstance(profit, (int, float)):
+                if profit > 0:
+                    st["win"] += 1
+                elif profit < 0:
+                    st["loss"] += 1
+                else:
+                    st["draw"] += 1
+        elif act in ("MODIFY", "MODIFY_TP"):
+            st["mods"] += 1
+
+        st["last_ts"] = max(st["last_ts"], ts)
+
+        # append to history table immediately if desired
+        if update_ui:
+            self._append_history_row(rec)
+            self._refresh_summary()
+
+    # ---------- UI population ----------
+    def _append_history_row(self, rec: dict):
+        if not self._passes_filter(rec):
+            return
+        row = self.historyTable.rowCount()
+        self.historyTable.insertRow(row)
+
+        ts = int(rec.get("t", time.time()))
+        time_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
+        ch = rec.get("source", "")
+        act = rec.get("action", "")
+        sym = rec.get("symbol", "")
+        side = rec.get("side", "")
+        price = ""
+        details = ""
+        profit = rec.get("profit", "")
+
+        if act == "OPEN":
+            ot = rec.get("order_type", "MARKET")
+            entry = rec.get("entry")
+            ref = rec.get("entry_ref")
+            if ot == "MARKET":
+                price = f"MARKET{f' ({ref})' if ref else ''}"
+            else:
+                price = f"{ot} @ {entry if entry is not None else ''}"
+            parts = []
+            if rec.get("sl") is not None: parts.append(f"SL {rec['sl']}")
+            tps = rec.get("tps") or []
+            if tps: parts.append(", ".join(f"TP{i+1} {v}" for i, v in enumerate(tps)))
+            details = " | ".join(parts)
+        elif act == "CLOSE":
+            price = "Market Close"
+            details = f"OID: {rec.get('oid','')}"
+        elif act == "MODIFY":
+            ns = rec.get("new_sl")
+            nt = rec.get("new_tps_csv", "")
+            details = " | ".join(x for x in [f"New SL {ns}" if ns is not None else "", f"TPs {nt}" if nt else ""] if x)
+        elif act == "MODIFY_TP":
+            details = f"TP{rec.get('tp_slot',1)} → {rec.get('tp_to')}"
+
+        for c, val in enumerate([time_str, ch, act, sym, side, price, details, str(profit) if profit not in (None, "") else ""]):
+            self.historyTable.setItem(row, c, QTableWidgetItem(val))
+
+        # optional row tint by action
+        tint = {
+            "OPEN": QColor(34, 197, 94, 40),
+            "CLOSE": QColor(239, 68, 68, 40),
+            "MODIFY": QColor(59, 130, 246, 40),
+            "MODIFY_TP": QColor(147, 51, 234, 40),
+            "EMERGENCY_CLOSE_ALL": QColor(220, 38, 127, 40),
+        }.get(act)
+        if tint:
+            for c in range(self.historyTable.columnCount()):
+                it = self.historyTable.item(row, c)
+                if it: it.setBackground(tint)
+
+        # cap rows
+        while self.historyTable.rowCount() > 400:
+            self.historyTable.removeRow(0)
+        self.historyTable.scrollToBottom()
+
+    def _refresh_summary(self):
+        # rebuild summary from self.stats (fast; small)
+        self.summaryTable.setRowCount(0)
+        filt = (self.channelFilter.text() or "").strip().lower()
+
+        for ch, s in self.stats.items():
+            if filt and filt not in ch.lower():
+                continue
+
+            opens = s["opens"]; closes = s["closes"]
+            wins, losses, draws = s["win"], s["loss"], s["draw"]
+            conf_avg = (s["conf_sum"] / s["conf_n"]) if s["conf_n"] else 0.0
+
+            # Win rate if we have profit outcomes
+            known = wins + losses
+            win_rate = (wins / known * 100.0) if known else None
+
+            # Signal Score
+            if known >= 3:
+                score = win_rate
+            else:
+                score = conf_avg  # proxy until we have outcomes
+
+            last_ts = s["last_ts"]
+            last_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(last_ts)) if last_ts else "—"
+
+            row = self.summaryTable.rowCount()
+            self.summaryTable.insertRow(row)
+            vals = [
+                ch,
+                f"{score:.1f}%" if score is not None else "—",
+                f"{win_rate:.1f}%" if win_rate is not None else "—",
+                str(opens),
+                str(closes),
+                f"{conf_avg:.1f}",
+                last_str
+            ]
+            for c, v in enumerate(vals):
+                self.summaryTable.setItem(row, c, QTableWidgetItem(v))
+
+        self.summaryTable.sortItems(1, Qt.DescendingOrder)
+
+    def _refresh_tables(self):
+        # rebuild both tables according to filter
+        self.summaryTable.setRowCount(0)
+        self.historyTable.setRowCount(0)
+        self._refresh_summary()
+        for rec in self.events[-600:]:
+            self._append_history_row(rec)
+
+    def _passes_filter(self, rec: dict) -> bool:
+        f = (self.channelFilter.text() or "").strip().lower()
+        if not f:
+            return True
+        return f in (rec.get("source", "") or "").lower()
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -1602,14 +1849,15 @@ class MainWindow(QWidget):
 
         # Pages
         self.dashboard = DashboardPage(self)
+        self.history   = HistoryPage(self)
         self.settings  = SettingsPage(self.cfg, self)
 
         self.tabs.addTab(self.dashboard, "Home")
+        self.tabs.addTab(self.history, "History")
         self.tabs.addTab(self.settings, "Settings")
 
-        # now that pages exist, we can update tracked count
+        # Connection between pages
         self._update_tracked_count()
-
         self._connect_page_signals()
 
         # UI timer
@@ -1791,6 +2039,11 @@ class MainWindow(QWidget):
         self.thread.runningState.connect(self._onRunningState)
         self.thread.dialogsReady.connect(self.onDialogsReady)
         self.thread.signalProcessed.connect(self._add_to_table)
+        self.thread.signalProcessed.connect(self.history.on_signal)
+
+        # If there is already a signals file, load recent history so the tab isn’t empty
+        if getattr(self.thread, "signal_file", None):
+            self.history.ingest_existing_file(self.thread.signal_file)
 
         self.thread.set_quality_threshold(self.dashboard.qualitySlider.value())
         self.thread.start()
