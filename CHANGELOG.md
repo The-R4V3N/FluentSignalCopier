@@ -7,6 +7,12 @@
 
 Fluent Copier (new GUI)
 
+UI / UX
+
+- Reduced default button height (setMinimumHeight from 44 → 34) to avoid overlap and make layout more compact.
+- Refined default window size and spacing so cards + action buttons don’t collide on smaller screens.
+- Inline auth box and Save/Start/Stop buttons aligned consistently across pages.
+
 Log duplication fixed:
 
 - _appendLog no longer appends messages twice; cleaned up duplicate HTML block.
