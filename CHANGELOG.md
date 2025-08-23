@@ -40,6 +40,7 @@ Fixed
 - Pending task warning on exit: heartbeat task is tracked/cancelled; loop shutdown is clean; closeEvent waits for thread.
 - Duplicated “added chats” toast and text set in onDialogsReady.
 - _update_tracked_count defined at class level and called only after pages exist.
+- Fixed only the first TP is shown in recent Signals. Now all TP's are shown
 
 ## [0.10.0] - 2025-08-17
 

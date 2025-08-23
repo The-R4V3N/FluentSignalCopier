@@ -488,15 +488,41 @@ class ChatPickerDialog(QDialog):
         def apply_filters():
             q = (self.search.text() or "").strip().lower()
             only = self.onlyWatched.isChecked()
+
             for item in self._all_items:
                 data = item.data(Qt.UserRole)
-                keys = data["keys"]
-                # watched check
-                watched_hit = bool(self.watch_set & keys) if self.watch_set else False
-                # text search
-                text_hit = (q == "") or any(q in k for k in keys)
-                # visible when (text matches) AND (either not only-watched or is watched)
-                item.setHidden(not (text_hit and (not only or watched_hit)))
+                chat_data = data["raw"]
+
+                # Build all possible identifiers for this chat
+                title = (chat_data.get("title") or "").lower()
+                username = (chat_data.get("username") or "").lower()
+                chat_id = str(chat_data.get("id", "")).lower()
+
+                # Create all possible searchable strings
+                identifiers = set()
+                if title: identifiers.add(title)
+                if username: 
+                    identifiers.add(username)
+                    identifiers.add(f"@{username}")
+                if chat_id: identifiers.add(chat_id)
+
+                # Check if matches search query
+                text_match = not q or any(q in ident for ident in identifiers)
+
+                # Check if in watch list (case-insensitive comparison)
+                in_watch_list = False
+                if self.watch_set:
+                    for watched in self.watch_set:
+                        watched_lower = watched.lower()
+                        # Check against all identifiers
+                        if (watched_lower in identifiers or 
+                            any(watched_lower == ident for ident in identifiers)):
+                            in_watch_list = True
+                            break
+        
+            # Show item if: matches text AND (not filtering or is in watch list)
+            show_item = text_match and (not only or in_watch_list)
+            item.setHidden(not show_item)
 
         self.search.textChanged.connect(apply_filters)
         self.onlyWatched.toggled.connect(apply_filters)
@@ -1379,45 +1405,50 @@ class DashboardPage(QWidget):
         # Keep only last 20 records
         if self.signalsTable.rowCount() >= 20:
             self.signalsTable.removeRow(0)
-        
+
         row = self.signalsTable.rowCount()
         self.signalsTable.insertRow(row)
-        
+
         # Format timestamp
         timestamp = signal_data.get('t', int(time.time()))
         time_str = time.strftime('%H:%M:%S', time.localtime(timestamp))
-        
+
         action = signal_data.get('action', '')
         symbol = signal_data.get('symbol', '')
         side = signal_data.get('side', '')
-        
+
         # Format entry/price based on action
         entry_price = ""
         details = ""
-        
+
         if action == "OPEN":
             order_type = signal_data.get('order_type', 'MARKET')
             entry = signal_data.get('entry')
             entry_ref = signal_data.get('entry_ref')
-            
+
             if order_type == "MARKET":
                 entry_price = f"MARKET ({entry_ref})" if entry_ref else "MARKET"
             else:
                 entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
-                
+
             sl = signal_data.get('sl')
-            tp = signal_data.get('tp')
+            tps = signal_data.get('tps', [])  # Get all TPs as list
+
             details_parts = []
             if sl:
                 details_parts.append(f"SL: {sl}")
-            if tp:
-                details_parts.append(f"TP: {tp}")
+            if tps:
+                # Show all TPs in format: TP1: 203.0, TP2: 204.0, TP3: 205.0
+                tp_details = []
+                for i, tp_value in enumerate(tps, 1):
+                    tp_details.append(f"TP{i}: {tp_value}")
+                details_parts.append(", ".join(tp_details))
             details = " | ".join(details_parts)
-            
+
         elif action == "CLOSE":
             entry_price = "Market Close"
             details = f"OID: {signal_data.get('oid', '')}"
-            
+
         elif action == "MODIFY":
             new_sl = signal_data.get('new_sl')
             new_tps = signal_data.get('new_tps_csv', '')
@@ -1427,17 +1458,17 @@ class DashboardPage(QWidget):
             if new_tps:
                 details_parts.append(f"New TPs: {new_tps}")
             details = " | ".join(details_parts)
-            
+
         elif action == "MODIFY_TP":
             tp_slot = signal_data.get('tp_slot', 1)
             tp_to = signal_data.get('tp_to')
             details = f"TP{tp_slot} → {tp_to}"
-            
+
         elif action == "EMERGENCY_CLOSE_ALL":
             entry_price = "EMERGENCY"
             details = "Close all positions"
             side = ""
-        
+
         # Set table items
         self.signalsTable.setItem(row, 0, QTableWidgetItem(time_str))
         self.signalsTable.setItem(row, 1, QTableWidgetItem(action))
@@ -1445,25 +1476,25 @@ class DashboardPage(QWidget):
         self.signalsTable.setItem(row, 3, QTableWidgetItem(side))
         self.signalsTable.setItem(row, 4, QTableWidgetItem(entry_price))
         self.signalsTable.setItem(row, 5, QTableWidgetItem(details))
-        
+    
         # Color coding by action
         action_colors = {
             "OPEN": QColor(34, 197, 94, 50),      # Green
-            "CLOSE": QColor(239, 68, 68, 50),     # Red
+            "CLOSE": QColor(239, 68, 68, 50),     # RedaddSignalToTable
             "MODIFY": QColor(59, 130, 246, 50),   # Blue
             "MODIFY_TP": QColor(147, 51, 234, 50), # Purple
             "EMERGENCY_CLOSE_ALL": QColor(220, 38, 127, 50)  # Pink
         }
-        
+
         color = action_colors.get(action, QColor(156, 163, 175, 50))
         for col in range(6):
             item = self.signalsTable.item(row, col)
             if item:
                 item.setBackground(color)
-        
+
         # Scroll to bottom
         self.signalsTable.scrollToBottom()
-        
+
         # Update signals count
         self.signal_count += 1
         self.signalsBadge.setText(str(self.signal_count))
@@ -1743,18 +1774,28 @@ class DashboardPage(QWidget):
         details = ""
 
         if action == "OPEN":
-            order_type = signal_data.get("order_type", "MARKET")
-            entry = signal_data.get("entry")
-            entry_ref = signal_data.get("entry_ref")
+            order_type = signal_data.get('order_type', 'MARKET')
+            entry = signal_data.get('entry')
+            entry_ref = signal_data.get('entry_ref')
+
             if order_type == "MARKET":
                 entry_price = f"MARKET ({entry_ref})" if entry_ref else "MARKET"
-            else:
-                entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
-            sl = signal_data.get("sl"); tp = signal_data.get("tp")
-            parts = []
-            if sl: parts.append(f"SL: {sl}")
-            if tp: parts.append(f"TP: {tp}")
-            details = " | ".join(parts)
+        else:
+            entry_price = f"{order_type} @ {entry}" if entry else f"{order_type}"
+            
+        sl = signal_data.get('sl')
+        tps = signal_data.get('tps', [])  # Get all TPs as list
+        
+        details_parts = []
+        if sl:
+            details_parts.append(f"SL: {sl}")
+        if tps:
+            # Show all TPs in format: TP1: 203.0, TP2: 204.0, TP3: 205.0
+            tp_details = []
+            for i, tp_value in enumerate(tps, 1):
+                tp_details.append(f"TP{i}: {tp_value}")
+            details_parts.append(", ".join(tp_details))
+            details = " | ".join(details_parts)
 
         elif action == "CLOSE":
             entry_price = "Market Close"
@@ -2074,11 +2115,11 @@ class MainWindow(QWidget):
             "STOPPED": "#6B7280",
             "COUNTER": "#84CC16",
         }
+
         aliases = {"WARNING": "WARN", "ERR": "ERROR"}
-    
         msg = strip_ansi(line or "")
         tag = "INFO"
-    
+
         m = re.match(r'^\[([A-Za-z]+)]\s*(.*)$', msg.strip())
         if m:
             tag = aliases.get(m.group(1).upper(), m.group(1).upper())
@@ -2089,10 +2130,8 @@ class MainWindow(QWidget):
                 tag = "ERROR"
             elif "warn" in low:
                 tag = "WARN"
-    
-        # ---- UI side-effects -------------------------------------------------
-
-        # When SCAN logs “…Cached N chats…”, update Channels card.
+                # ---- UI side-effects -------------------------------------------------
+                # When SCAN logs "...Cached N chats...", update Channels card with TRACKED count only
         if tag == "SCAN":
             try:
                 # More robust pattern matching
@@ -2104,12 +2143,13 @@ class MainWindow(QWidget):
                 for pattern in patterns:
                     mm = re.search(pattern, msg, re.IGNORECASE)
                     if mm:
-                        self.dashboard.updateChannelCount(int(mm.group(1)))
+                        # Update with the actual number of TRACKED channels, not total
+                        tracked_count = len(self._watched_list())
+                        self.dashboard.updateChannelCount(tracked_count)
                         break
             except Exception:
                 pass
-
-        # ---- Pretty HTML log -------------------------------------------------
+                # ---- Pretty HTML log -------------------------------------------------
         color = colors.get(tag, "#6B7280")
         badge = (
             f'<span style="background-color:{color};'
@@ -2120,7 +2160,7 @@ class MainWindow(QWidget):
         html = f'<div style="margin:2px 0;">{badge}&nbsp;&nbsp;<span style="white-space:pre-wrap;">{safe_msg}</span></div>'
         self.dashboard.log.append(html)
         self.dashboard.log.moveCursor(QTextCursor.End)
-
+        
     # --- Auth UI ------------------------------------------------------
     def _showAuthBox(self, mode: str):
         if not hasattr(self, "dashboard"):
