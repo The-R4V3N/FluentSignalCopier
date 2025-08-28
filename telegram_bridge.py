@@ -2,7 +2,9 @@
 # Python 3.11+.  pip install telethon python-dotenv
 import asyncio, json, time, re, os, sys
 from pathlib import Path
+from turtle import title
 from telethon import TelegramClient, events
+from persistence import HistoryStore, NewSignal
 
 # =====================================================================
 # Helpers (normalization, numbers, env)
@@ -102,6 +104,10 @@ COUNTER_FILE  = Path(MT5_FILES_DIR) / "signal_counter.txt"
 RECENT_SYMBOL_BY_CHAT: dict[str, str] = {}
 LAST_OPEN_OID: dict[tuple[str, str], int] = {}
 SEEN_OPEN: set[tuple[str, int]] = set()
+# === Persistence (SQLite) ===
+store = HistoryStore()  # one shared connection (WAL), safe for concurrent reads
+# Track the latest signal_id per (channel, symbol) so we can attach edits/close
+LAST_OPEN_SIGID: dict[tuple[str, str], int] = {}
 
 # Global counter
 GLOBAL_COUNTER = 0
@@ -512,6 +518,11 @@ async def main():
             with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=True) + "\n")
             print(f"[SAVED] CLOSE {sym} (oid={oid}, gid={gid})")
+
+            # Persist close intent against the last open signal for this channel/symbol
+            sig_id = LAST_OPEN_SIGID.get((title, sym))
+            if sig_id:
+                store.mark_event(sig_id, "MANUAL_CLOSE", note="Close via Telegram", ts_ms=int(time.time()*1000))
             return
 
         # MODIFY_TP?
@@ -538,6 +549,11 @@ async def main():
                 with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
                     f.write(json.dumps(rec, ensure_ascii=True) + "\n")
                 print(f"[SAVED] MODIFY_TP {sym} TP{tp_slot}->{tp_to} (gid={gid})")
+
+                # Persist TP adjustment
+                sig_id = LAST_OPEN_SIGID.get((title, sym))
+                if sig_id:
+                    store.mark_event(sig_id, "MODIFY", price=tp_to, note=f"TP{tp_slot} -> {tp_to}", ts_ms=int(time.time()*1000))
             return
 
         # MODIFY?
@@ -561,6 +577,14 @@ async def main():
             with open(SIGNAL_FILE, "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=True) + "\n")
             print(f"[SAVED] MODIFY {sym} SL->{corr['new_sl']} TPs->{rec['new_tps_csv']} (gid={gid})")
+
+            # Persist SL/TP corrections
+            sig_id = LAST_OPEN_SIGID.get((title, sym))
+            if sig_id:
+                note_bits = []
+                if corr["new_sl"] is not None: note_bits.append(f"SL -> {corr['new_sl']}")
+                if corr["new_tps"]:           note_bits.append(f"TPs -> {','.join(map(str, corr['new_tps']))}")
+                store.mark_event(sig_id, "MODIFY", note="; ".join(note_bits), ts_ms=int(time.time()*1000))
             return
 
         # Dedupe OPEN per (title, message id)
@@ -573,6 +597,20 @@ async def main():
         if not parsed:
             print("[PARSE] No valid signal")
             return
+        
+        # Persist the *signal* itself (independent of trade fill)
+        sig_id = store.add_signal(NewSignal(
+            ts_ms=int(time.time()*1000),
+            channel=title,
+            message_id=str(event.id),
+            symbol=sym,
+            side=parsed["side"],
+            sl=parsed["sl"],
+            entry=parsed.get("entry_ref"),   # keep original header price for reference
+            tps=parsed.get("tps") or [],
+            raw_text=txt.strip()
+        ))
+        LAST_OPEN_SIGID[(title, sym)] = sig_id  # remember for subsequent edits/close
 
         sym = parsed["symbol"]
         RECENT_SYMBOL_BY_CHAT[title] = sym

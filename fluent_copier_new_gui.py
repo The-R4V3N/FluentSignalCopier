@@ -14,6 +14,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Iterable
 from html import escape
+from persistence import HistoryStore
 
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QCoreApplication, QThread
 from PySide6.QtGui import QTextCursor, QIcon, QColor
@@ -167,30 +168,34 @@ SYM_RE = re.compile(
     r'(?:#)?\b([A-Z]{6}|[A-Z]{2,5}\d{2,3}|XAU|XAUSD|GOLD|SILVER|XAG|USOIL|WTI|OIL|XTIUSD|UKOIL|BRENT|XBRUSD|SPX500|SP500|US500|USTEC|US30|DJ30)\b',
     re.I
 )
+
+# Accept 1) plain numbers  2) numbers with grouped thousands (space, NBSP, narrow NBSP, figure space, comma, apostrophe)
+NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?"
+
 SIDE_RE = re.compile(r'\b(BUY|SELL)\b', re.I)
-ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(-?\d+(?:[.,]\d+)?)\b', re.I)
+ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(' + NUM_TOKEN + r')\b', re.I)
 
 SL_RES = [
-    re.compile(r'\b(?:STOP\s*LOSS|STOPLOSS)\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'\bSL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    re.compile(r'\b(?:STOP\s*LOSS|STOPLOSS)\b[^0-9-]*?@?\s*(' + NUM_TOKEN + r')\b', re.I),
+    re.compile(r'\bSL\b[^0-9-]*?@?\s*(' + NUM_TOKEN + r')\b', re.I),
 ]
 
 TP_RES = [
-    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    re.compile(r'\bTP\d*\s*@\s*(' + NUM_TOKEN + r')\b', re.I),
+    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(' + NUM_TOKEN + r')\b', re.I),
+    re.compile(r'^\s*TP\d*\s*@?\s*(' + NUM_TOKEN + r')\b', re.I),
 ]
 
 # Order type patterns
 HEADER_PENDING_FULL_RE = re.compile(
     r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>-?\d+(?:[.,]\d+)?)\b',
+    r'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>' + NUM_TOKEN + r')\b',
     re.I | re.M
 )
 
 HEADER_INLINE_PRICE_RE = re.compile(
     r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+@?\s*(?P<price>-?\d+(?:[.,]\d+)?)\b',
+    r'(?P<side>BUY|SELL)\s+@?\s*(?P<price>' + NUM_TOKEN + r')\b',
     re.I | re.M
 )
 
@@ -1192,7 +1197,7 @@ class DashboardPage(QWidget):
         top.setSpacing(12)
         root.addLayout(top)
 
-        # Cards area
+        # Cards area (left)
         cards = QGridLayout()
         cards.setHorizontalSpacing(12)
         cards.setVerticalSpacing(12)
@@ -1224,7 +1229,7 @@ class DashboardPage(QWidget):
 
         top.addLayout(left, 1)
 
-        # Actions column
+        # Actions column (right)
         actions = QVBoxLayout()
         actions.setSpacing(10)
         self.startBtn = PrimaryPushButton("START", self)
@@ -1239,7 +1244,13 @@ class DashboardPage(QWidget):
         self.pickBtn.setEnabled(False)
         actions.addWidget(self.pickBtn)
         actions.addStretch(1)
-        top.addLayout(actions)
+
+        # Wrap actions in a widget to control min width
+        actionsWidget = QWidget(self)
+        actionsWidget.setLayout(actions)
+        actionsWidget.setMinimumWidth(220)
+        actionsWidget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
+        top.addWidget(actionsWidget)
 
         # Inline auth box
         self.authBox = QWidget(self)
@@ -1628,11 +1639,80 @@ class HistoryPage(QWidget):
         self.historyTable.horizontalHeader().setStretchLastSection(True)
         self.historyTable.setAlternatingRowColors(True)
         root.addWidget(self.historyTable, 1)
+        self.refreshBtn = PushButton("Refresh from DB", self)
+        row.addWidget(self.refreshBtn)
 
         # wire filter
         self.channelFilter.textChanged.connect(self._refresh_tables)
 
     # ---------- public API ----------
+    def hydrate_from_store(self, store: HistoryStore, limit: int = 600):
+        """Fill Channel Performance + Recent Signals from the persistent DB."""
+        try:
+            # 1) Channel performance
+            self.stats.clear()
+            self.summaryTable.setRowCount(0)
+            for row in store.channel_stats():
+                ch = row.get("channel") or ""
+                wins = int(row.get("wins") or 0)
+                losses = int(row.get("losses") or 0)
+                total = int(row.get("signals_total") or 0)
+                known = wins + losses
+                win_rate = (wins / known * 100.0) if known else None
+
+                r = self.summaryTable.rowCount()
+                self.summaryTable.insertRow(r)
+                vals = [
+                    ch,
+                    f"{(win_rate if win_rate is not None else 0.0):.1f}%" if known >= 3 else "—",  # “Signal score” proxy
+                    f"{win_rate:.1f}%" if win_rate is not None else "—",
+                    str(total),
+                    "—",          # closes count (optional unless you persist closes in DB->results)
+                    "—",          # avg confidence (GUI-only metric)
+                    "—",          # last signal time (optional: add a view for last ts if you want)
+                ]
+                for c, v in enumerate(vals):
+                    self.summaryTable.setItem(r, c, QTableWidgetItem(v))
+
+            # 2) Recent signals
+            self.historyTable.setRowCount(0)
+            recent = store.recent_signals(limit=limit)
+            for s in reversed(recent):  # oldest first so the table builds up chronologically
+                rec = {
+                    "t": int((s.get("ts_ms") or 0) / 1000),
+                    "source": s.get("channel", ""),
+                    "action": s.get("status", "NEW").upper(),  # DB status -> action-ish
+                    "symbol": s.get("symbol", ""),
+                    "side": s.get("side", "") or "",
+                    "entry": s.get("entry", None),
+                    "tps": s.get("tps", []),
+                    "sl": s.get("sl", None),
+                    "order_type": "MARKET" if s.get("entry") in (None, "") else "LIMIT",  # best-effort
+                }
+                # Reuse existing row builder
+                self._append_history_row(self._coerce_db_to_ui(rec))
+            self.summaryTable.sortItems(1, Qt.DescendingOrder)
+        except Exception:
+            pass
+
+    def _coerce_db_to_ui(self, rec: dict) -> dict:
+        """Map DB-like signal dict to the UI’s expected keys so _append_history_row works."""
+        out = {
+            "t": rec.get("t", int(time.time())),
+            "source": rec.get("source", ""),
+            "action": rec.get("action", "OPEN"),
+            "symbol": rec.get("symbol", ""),
+            "side": rec.get("side", ""),
+            "order_type": rec.get("order_type", "MARKET"),
+            "entry": rec.get("entry"),
+            "entry_ref": rec.get("entry_ref"),
+            "sl": rec.get("sl"),
+            "tps": rec.get("tps") or [],
+            "new_sl": rec.get("new_sl"),
+            "new_tps_csv": rec.get("new_tps_csv", ""),
+        }
+        return out
+
     def ingest_existing_file(self, path: Path, max_lines: int = 1200):
         """Load recent JSONL records from file at startup."""
         if not path or not path.exists():
@@ -1827,8 +1907,10 @@ class MainWindow(QWidget):
         self.setWindowTitle("Fluent Signal Copier")
         QCoreApplication.setOrganizationName("R4V3N")
         QCoreApplication.setOrganizationDomain("r4v3n.dev")
-        self.setMinimumSize(960, 600)
+        self.setMinimumSize(960, 600) # Main Window size
         self.resize(1000, 650)
+        self.store = HistoryStore()   # durable history / channel stats
+        self._last_seen_ea_key = None
 
         # Icon
         ico_path = resource_path("app.ico")
@@ -1855,6 +1937,9 @@ class MainWindow(QWidget):
         self.tabs.addTab(self.dashboard, "Home")
         self.tabs.addTab(self.history, "History")
         self.tabs.addTab(self.settings, "Settings")
+
+        # Fill History tab from persistent store at boot
+        self.history.hydrate_from_store(self.store, limit=600)
 
         # Connection between pages
         self._update_tracked_count()
@@ -1883,7 +1968,39 @@ class MainWindow(QWidget):
         self.dashboard.qualityChanged.connect(self._onQualityChanged)
 
     def _tickUi(self):
-        pass
+        # Only when thread has created/selected the file location
+        path = None
+        if self.thread and getattr(self.thread, "signal_file", None):
+            path = self.thread.signal_file
+        else:
+            # best-effort guess (same default as EA/GUI)
+            path = Path((self.settings.mt5Dir.text() or "").strip()) / "Fluent_signals.jsonl"
+        if not path or not path.exists():
+            return
+
+        rec = self._read_last_signal_record()
+        if not rec:
+            return
+
+        # Only ingest EA-emitted results (avoid duplicating our own OPEN/MODIFY writes)
+        src = (rec.get("source") or "").upper()
+        if src != "EA":
+            return
+
+        # Deduplicate by a compact tuple key
+        key = (rec.get("action"), rec.get("t"), rec.get("symbol"),
+               rec.get("oid"), rec.get("gid"), rec.get("profit"))
+        if key == self._last_seen_ea_key:
+            return
+        self._last_seen_ea_key = key
+
+        # Feed both tables
+        try:
+            self.history.on_signal(rec, update_ui=True)
+            if hasattr(self.dashboard, "addSignalToTable"):
+                self.dashboard.addSignalToTable(rec)
+        except Exception:
+            pass
     
     def _read_last_signal_record(self):
         """Return the last non-empty JSON object from the signal JSONL file, or None."""
@@ -2047,6 +2164,10 @@ class MainWindow(QWidget):
 
         self.thread.set_quality_threshold(self.dashboard.qualitySlider.value())
         self.thread.start()
+
+        # Refresh History tab from DB right after starting (in case bridge already persisted new signals)
+        self.history.hydrate_from_store(self.store, limit=600)
+
         self._onRunningState(True)
 
     def stop(self):
