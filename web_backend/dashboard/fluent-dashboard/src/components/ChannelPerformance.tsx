@@ -1,14 +1,59 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type ChanRow = {
     channel: string;
-    signal_score: number | null;
+    signal_score: number | null;  // averaged if present per OPEN
     win_rate: number | null;
     opens: number;
     closes: number;
     avg_confidence: number | null;
     last_signal: string | null;
 };
+
+type RawRec = {
+    action?: string;              // "OPEN" | "CLOSE" | ...
+    source?: string;              // channel name (may be internal for CLOSE)
+    gid?: string | number;
+    oid?: string | number;
+    id?: string | number;         // sometimes OPENs use id
+    profit?: number | string;     // CLOSE profit
+    confidence?: number;          // optional per-OPEN confidence (0..100)
+    score?: number;               // optional per-OPEN score
+    signal_score?: number;        // optional alt name
+    t?: number | string;          // unix seconds
+    ts?: number | string;         // optional alt time
+    time?: number | string;       // optional alt time
+};
+
+const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
+
+// join key: prefer gid, then oid, then id (OPENs sometimes only have id)
+const keyFor = (r: RawRec) => String(r.gid ?? r.oid ?? r.id ?? "").trim();
+
+function canonicalSource(row: RawRec, opensByKey: Map<string, RawRec>): string {
+    const k = keyFor(row);
+    const open = k ? opensByKey.get(k) : undefined;
+    const src = String(open?.source ?? row.source ?? "").trim();
+    return INTERNAL_SOURCES.has(src) ? "" : src;
+}
+
+function num(x: any): number | null {
+    const n = Number(x);
+    return Number.isFinite(n) ? n : null;
+}
+
+function coalesceTime(rec: RawRec): number | null {
+    return num(rec.t ?? rec.ts ?? rec.time);
+}
+
+function fmtWhen(t?: number | null): string | null {
+    if (!t || !Number.isFinite(t)) return null;
+    try {
+        return new Date(t * 1000).toLocaleString();
+    } catch {
+        return null;
+    }
+}
 
 export default function ChannelPerformance({
     selected,
@@ -24,14 +69,120 @@ export default function ChannelPerformance({
     }) => void;
 }) {
     const [rows, setRows] = useState<ChanRow[]>([]);
+    const polling = useRef<number | null>(null);
 
+    // Poll raw signals and compute channel stats on the client
     useEffect(() => {
-        fetch("http://127.0.0.1:8000/api/channel-performance")
-            .then(r => r.json())
-            .then((d) => setRows(Array.isArray(d) ? d : []))
-            .catch(() => setRows([]));
+        const fetchAndBuild = async () => {
+            let data: RawRec[] = [];
+            try {
+                const r = await fetch("http://127.0.0.1:8000/api/signals?limit=500");
+                const json = await r.json();
+                data = Array.isArray(json) ? (json as RawRec[]) : [];
+            } catch {
+                data = [];
+            }
+
+            // 1) Build OPEN index
+            const opensByKey = new Map<string, RawRec>();
+            for (const rec of data) {
+                if ((rec.action ?? "").toUpperCase() === "OPEN") {
+                    const k = keyFor(rec);
+                    if (k) opensByKey.set(k, rec);
+                }
+            }
+
+            // 2) Aggregate by canonical source
+            type Acc = {
+                opens: number;
+                closes: number;
+                wins: number;
+                totalClosed: number;
+                confSum: number;
+                confN: number;
+                scoreSum: number;
+                scoreN: number;
+                lastT?: number;
+            };
+
+            const byChan = new Map<string, Acc>();
+
+            for (const rec of data) {
+                const canon = canonicalSource(rec, opensByKey);
+                if (!canon) continue; // drop EA/GUI/WEB/blank
+
+                let acc = byChan.get(canon);
+                if (!acc) {
+                    acc = {
+                        opens: 0, closes: 0, wins: 0, totalClosed: 0,
+                        confSum: 0, confN: 0, scoreSum: 0, scoreN: 0,
+                        lastT: undefined,
+                    };
+                    byChan.set(canon, acc);
+                }
+
+                const act = (rec.action ?? "").toUpperCase();
+                if (act === "OPEN") {
+                    acc.opens += 1;
+                    if (typeof rec.confidence === "number") {
+                        acc.confSum += rec.confidence; acc.confN += 1;
+                    }
+                    const scoreVal = (typeof rec.signal_score === "number")
+                        ? rec.signal_score
+                        : (typeof rec.score === "number" ? rec.score : null);
+                    if (scoreVal !== null) { acc.scoreSum += scoreVal!; acc.scoreN += 1; }
+                } else if (act === "CLOSE") {
+                    acc.closes += 1;
+                    const p = num(rec.profit);
+                    if (p !== null) {
+                        acc.totalClosed += 1;
+                        if (p > 0) acc.wins += 1;
+                    }
+                }
+
+                const tVal = coalesceTime(rec);
+                if (tVal !== null) {
+                    acc.lastT = Math.max(acc.lastT ?? 0, tVal);
+                }
+            }
+
+            // 3) Convert to ChanRow[]
+            const out: ChanRow[] = [];
+            for (const [channel, a] of byChan) {
+                const win_rate = a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
+                const avg_confidence = a.confN > 0 ? a.confSum / a.confN : null;
+                const signal_score = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
+
+                out.push({
+                    channel,
+                    signal_score,
+                    win_rate,
+                    opens: a.opens,
+                    closes: a.closes,
+                    avg_confidence,
+                    last_signal: fmtWhen(a.lastT ?? null),
+                });
+            }
+
+            // 4) Sort: by win %, then by closes desc
+            out.sort((a, b) => {
+                const aw = a.win_rate ?? -1, bw = b.win_rate ?? -1;
+                if (bw !== aw) return bw - aw;
+                return (b.closes - a.closes);
+            });
+
+            setRows(out);
+        };
+
+        // initial load + lightweight polling (every 5s)
+        fetchAndBuild();
+        polling.current = window.setInterval(fetchAndBuild, 5000);
+        return () => {
+            if (polling.current) window.clearInterval(polling.current);
+        };
     }, []);
 
+    // Summary for KPI cards above
     const summary = useMemo(() => {
         const validWin = rows.filter(r => typeof r.win_rate === "number");
         const validScore = rows.filter(r => typeof r.signal_score === "number");
@@ -112,11 +263,15 @@ export default function ChannelPerformance({
                                         )}
                                     </div>
                                 </td>
-                                <td className="px-3 py-2 tabular-nums">{fmtPct(r.signal_score)}</td>
+                                <td className="px-3 py-2 tabular-nums">
+                                    {typeof r.signal_score === "number" ? r.signal_score.toFixed(1) + "%" : "—"}
+                                </td>
                                 <td className="px-3 py-2 tabular-nums">{fmtPct(r.win_rate)}</td>
                                 <td className="px-3 py-2 tabular-nums">{r.opens}</td>
                                 <td className="px-3 py-2 tabular-nums">{r.closes}</td>
-                                <td className="px-3 py-2 tabular-nums">{typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}</td>
+                                <td className="px-3 py-2 tabular-nums">
+                                    {typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}
+                                </td>
                                 <td className="px-3 py-2">{r.last_signal ?? "—"}</td>
                             </tr>
                         ))}

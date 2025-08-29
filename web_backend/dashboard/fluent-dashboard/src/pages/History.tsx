@@ -5,6 +5,21 @@ import ChannelPerformance from "../components/ChannelPerformance";
 import StatCard from "../components/StatCard";
 import { useWebSocketFeed } from "../hooks/useWebSocketFeed";
 
+/* === NEW: helpers for canonical source attribution === */
+type Row = Rec & { action?: string; gid?: string; oid?: string; source?: string };
+
+const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
+const keyFor = (r: Row) => (r.gid || r.oid || "").trim();
+
+function canonicalSource(row: Row, opensByKey: Map<string, Row>): string {
+    const k = keyFor(row);
+    const open = k ? opensByKey.get(k) : undefined;
+    // Prefer OPEN.source (truth), then row.source; strip internals
+    const src = (open?.source || row.source || "").trim();
+    return INTERNAL_SOURCES.has(src) ? "" : src;
+}
+/* ===================================================== */
+
 export default function HistoryPage() {
     const [rows, setRows] = useState<Rec[]>([]);
     const [paused, setPaused] = useState(false);
@@ -31,11 +46,34 @@ export default function HistoryPage() {
 
     useWebSocketFeed(onMsg);
 
-    // filtered view for Recent Signals
+    /* === NEW: Build opens index from current rows === */
+    const opensByKey = useMemo(() => {
+        const m = new Map<string, Row>();
+        for (const r of rows as Row[]) {
+            if ((r.action || "").toUpperCase() === "OPEN") {
+                const k = keyFor(r);
+                if (k) m.set(k, r);
+            }
+        }
+        return m;
+    }, [rows]);
+
+    /* === NEW: Canonicalize sources for all rows (display layer only) === */
+    const rowsCanon: Row[] = useMemo(() => {
+        return (rows as Row[])
+            .map(r => {
+                const src = canonicalSource(r, opensByKey);
+                // Rewrite source for UI, drop internal/blank sources
+                return { ...r, source: src };
+            })
+            .filter(r => !!r.source); // hide internal (EA/GUI/WEB) and blanks
+    }, [rows, opensByKey]);
+
+    /* === CHANGED: filter using canonicalized source === */
     const filteredRows = useMemo(() => {
-        if (!selectedChannel) return rows;
-        return rows.filter(r => (r.source || "") === selectedChannel);
-    }, [rows, selectedChannel]);
+        if (!selectedChannel) return rowsCanon;
+        return rowsCanon.filter(r => (r.source || "") === selectedChannel);
+    }, [rowsCanon, selectedChannel]);
 
     return (
         <div className="p-6 space-y-6">
@@ -93,7 +131,8 @@ export default function HistoryPage() {
                         </span>
                     )}
                 </div>
-                <RecentSignalsTable rows={filteredRows} />
+                {/* NOTE: RecentSignalsTable will now receive rows where source is canonicalized */}
+                <RecentSignalsTable rows={filteredRows as Rec[]} />
             </div>
         </div>
     );

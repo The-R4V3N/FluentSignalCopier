@@ -275,7 +275,7 @@ def _try_sl(text: str) -> Optional[float]:
     return _sanitize_price(v)
 
 def _try_tp(line: str) -> Optional[float]:
-    for r in TP_RES:
+    for r in TP_RE:
         m = r.search(line)
         if m:
             v = _num(m.group(1))
