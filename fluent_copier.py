@@ -273,6 +273,10 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     t = _normalize_spaces(text).strip()
     low = t.lower()
 
+    # Skip signals marked as risky
+    if "risky" in low:   # catches both "Risky" and "Verry Risky"
+        return None
+
     # ---- CLOSE ----
     if CLOSE_ANY_RE.search(t):
         ms = SYM_RE.search(t)
@@ -737,7 +741,10 @@ class CopierThread(QThread):
 
                     p = parse_message(txt)
                     if not p:
-                        self.logLine.emit("[PARSE] No valid signal.")
+                        if "risky" in (txt or "").lower():
+                            self.logLine.emit("[SKIP] Risky signal ignored")
+                        else:
+                            self.logLine.emit("[PARSE] No valid signal.")
                         return
 
                     # confidence (gate OPEN only)

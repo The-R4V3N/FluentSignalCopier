@@ -232,6 +232,9 @@ CORR_SL_TYP0_RE   = re.compile(r'\b(?:typo|correct|correction).*\bSL\b.*?(?:was\
 CORR_SL_TO_RE     = re.compile(r'\b(edit(?:ing)?|update(?:d)?)\b.*\bSL\b.*\bto\b\s*(-?\d+(?:[.,]\d+)?)', re.I)
 SYMBOL_HINT_RE    = re.compile(r'\b(gold|xauusd|xau|nas100|us100|ustec|dj30|us30|dow|spx500|sp500|us500|de40|dax|ger40|gbpjpy|xbrusd|xtiusd|usoil|wti|ukoil|brent)\b', re.I)
 
+# Skip signals explicitly marked risky (matches "Risky" and "Verry Risky"/"Very Risky")
+RISKY_RE = re.compile(r'\b(?:ver+y\s+)?risky\b', re.I)
+
 # Execution / intent cues
 NOW_MARKET_RE   = re.compile(r'\b(?:BUY\s+NOW|SELL\s+NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
 PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL)\s+(LIMIT|STOP)\b', re.I)
@@ -386,8 +389,13 @@ def parse_block_style(text: str):
                 entry = num(m.group(1))
                 if entry is not None:
                     break
+                
+    # 5) --- Risky filter ---
+    if RISKY_RE.search(t):
+        print("[SKIP] Risky signal ignored")
+        return None
 
-    # 5) SL & TPs (unchanged)
+    # 6) SL & TPs (unchanged)
     for ln in lines:
         low = ln.lower()
         if any(w in low for w in ('sl','stop','stoploss')):
@@ -413,7 +421,7 @@ def parse_block_style(text: str):
     if not side or not symbol:
         return None
 
-    # --- NEW: global cues override / confirm order_type
+    # 7)--- Global cues override / confirm order_type
     pm = PENDING_PAIR_RE.search(t)
     if pm:
         # any “… LIMIT/STOP” anywhere → pending
@@ -424,7 +432,7 @@ def parse_block_style(text: str):
     elif NOW_MARKET_RE.search(t):
         order_type = "MARKET"
 
-    # Risk & lots overrides (unchanged)
+    # 8)Risk & lots overrides
     risk_percent = None
     m = RISK_PCT_RE.search(t)
     if m:
