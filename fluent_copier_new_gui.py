@@ -102,6 +102,51 @@ def _normalize_spaces(s: str) -> str:
     s = s.replace('＠', '@')
     return s
 
+def normalize_price(num_str: str) -> float | None:
+    """
+    Convert strings like '109,840', '1,234.56', '1.234,56', '3391', '3391,5' to float.
+    Assumes:
+      - If both '.' and ',' appear, ',' are thousands and '.' is decimal (US style), OR
+        '.' are thousands and ',' is decimal (EU style). We detect by final separator block length.
+      - If only one of them appears, decide by rightmost group length (<=2 -> decimal).
+    """
+    s = num_str.strip()
+    # Remove weird spaces
+    s = s.replace('\u00A0', ' ').replace(' ', '')
+
+    if ',' in s and '.' in s:
+        # Decide decimal separator by last occurrence
+        last_comma = s.rfind(',')
+        last_dot   = s.rfind('.')
+        if last_comma > last_dot:
+            # comma as decimal, dots as thousands: 1.234,56
+            s = s.replace('.', '')
+            s = s.replace(',', '.')
+        else:
+            # dot as decimal, commas as thousands: 1,234.56
+            s = s.replace(',', '')
+    elif ',' in s:
+        # Only comma present -> decide by group length after last comma
+        right = s.split(',')[-1]
+        if 1 <= len(right) <= 2:
+            # comma is decimal
+            s = s.replace('.', '')  # any stray dots were thousands
+            s = s.replace(',', '.')
+        else:
+            # comma is thousands
+            s = s.replace(',', '')
+    elif '.' in s:
+        # Only dot present -> decide by group length after last dot
+        right = s.split('.')[-1]
+        if not (1 <= len(right) <= 2):
+            # dot is thousands
+            s = s.replace('.', '')
+
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 def _num(s: str) -> Optional[float]:
     """
     Robust numeric parser:
@@ -141,6 +186,14 @@ def _sanitize_price(v: Optional[float]) -> Optional[float]:
         return None
     return abs(v)  # Prices are never negative
 
+def _find_tps(text: str) -> list[float]:
+    out = []
+    for m in TP_RE.finditer(text):
+        v = _num(m.group(1))           # ← normalization happens here
+        if v is not None:
+            out.append(_sanitize_price(v))
+    return out
+
 # =====================================================================
 # Signal Parsing
 # =====================================================================
@@ -175,16 +228,16 @@ NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:
 SIDE_RE = re.compile(r'\b(BUY|SELL)\b', re.I)
 ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(' + NUM_TOKEN + r')\b', re.I)
 
-SL_RES = [
-    re.compile(r'\b(?:STOP\s*LOSS|STOPLOSS)\b[^0-9-]*?@?\s*(' + NUM_TOKEN + r')\b', re.I),
-    re.compile(r'\bSL\b[^0-9-]*?@?\s*(' + NUM_TOKEN + r')\b', re.I),
-]
+# Accepts: SL / S/L / STOPLOSS / STOP LOSS / STOPPLOSS, with optional @ or :
+# Handles spaces/thousand separators/decimal commas/dots
+SL_RES = re.compile(
+    r'(?im)^\s*(?:SL|S/L|STOPP?[\s\-]*LOSS)\s*(?:@|:)?\s*([0-9][0-9\s.,]*)\b'
+)
 
-TP_RES = [
-    re.compile(r'\bTP\d*\s*@\s*(' + NUM_TOKEN + r')\b', re.I),
-    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(' + NUM_TOKEN + r')\b', re.I),
-    re.compile(r'^\s*TP\d*\s*@?\s*(' + NUM_TOKEN + r')\b', re.I),
-]
+# Accepts: TP, TP1, TP2 ... with optional @ : = -> and loose spacing/commas
+TP_RE = re.compile(
+    r'(?im)^\s*TP\d*\s*(?:@|:|=|->)?\s*([0-9][0-9\s.,]*)\b'
+)
 
 # Order type patterns
 HEADER_PENDING_FULL_RE = re.compile(
@@ -214,14 +267,12 @@ TP_MOVE_PATTERNS = [
     re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
-def _try_sl(line: str) -> Optional[float]:
-    for r in SL_RES:
-        m = r.search(line)
-        if m:
-            v = _num(m.group(1))
-            if v is not None:
-                return _sanitize_price(v)
-    return None
+def _try_sl(text: str) -> Optional[float]:
+    m = SL_RES.search(text)
+    if not m:
+        return None
+    v = _num(m.group(1))   # <-- normalization happens here (your point #3)
+    return _sanitize_price(v)
 
 def _try_tp(line: str) -> Optional[float]:
     for r in TP_RES:
@@ -341,16 +392,11 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
             if me:
                 entry = _num(me.group(1))
 
-    for ln in lines:
-        lo = ln.lower()
-        if "sl" in lo and "entry" not in lo:
-            v = _try_sl(ln)
-            if v is not None and sl is None:
-                sl = v
-        if "tp" in lo:
-            v = _try_tp(ln)
-            if v is not None:
-                tps.append(v)
+    if sl is None:
+        sl = _try_sl(t)   # search the whole message once
+
+    # TP: switch to full-text collection
+    tps = _find_tps(t)
 
     if not (side and symbol):
         return None

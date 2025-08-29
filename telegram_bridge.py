@@ -44,6 +44,51 @@ def normalize_spaces(s: str) -> str:
          .replace('＠', '@')      # fullwidth '@'
     )
 
+def normalize_price(num_str: str) -> float | None:
+    """
+    Convert strings like '109,840', '1,234.56', '1.234,56', '3391', '3391,5' to float.
+    Assumes:
+      - If both '.' and ',' appear, ',' are thousands and '.' is decimal (US style), OR
+        '.' are thousands and ',' is decimal (EU style). We detect by final separator block length.
+      - If only one of them appears, decide by rightmost group length (<=2 -> decimal).
+    """
+    s = num_str.strip()
+    # Remove weird spaces
+    s = s.replace('\u00A0', ' ').replace(' ', '')
+
+    if ',' in s and '.' in s:
+        # Decide decimal separator by last occurrence
+        last_comma = s.rfind(',')
+        last_dot   = s.rfind('.')
+        if last_comma > last_dot:
+            # comma as decimal, dots as thousands: 1.234,56
+            s = s.replace('.', '')
+            s = s.replace(',', '.')
+        else:
+            # dot as decimal, commas as thousands: 1,234.56
+            s = s.replace(',', '')
+    elif ',' in s:
+        # Only comma present -> decide by group length after last comma
+        right = s.split(',')[-1]
+        if 1 <= len(right) <= 2:
+            # comma is decimal
+            s = s.replace('.', '')  # any stray dots were thousands
+            s = s.replace(',', '.')
+        else:
+            # comma is thousands
+            s = s.replace(',', '')
+    elif '.' in s:
+        # Only dot present -> decide by group length after last dot
+        right = s.split('.')[-1]
+        if not (1 <= len(right) <= 2):
+            # dot is thousands
+            s = s.replace('.', '')
+
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
 def num(s: str):
     """
     Robust numeric parser:
@@ -177,6 +222,9 @@ SL_PATTERNS = [
     re.compile(r'\bSL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
+SL_RE = re.compile(
+    r'(?im)^\s*(?:SL|S/L|STOP\s*LOSS|STOPLOSS)\s*(?:@|:)?\s*([+\-]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*$'
+)
 TP_PATTERNS = [
     # "TP @ 198.600", "TP@198.600"  (accept full decimals; no bare TPn without price)
     re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
