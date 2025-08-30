@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 export type ChanRow = {
     channel: string;
-    signal_score: number | null;  // averaged if present per OPEN
+    signal_score: number | null;  // averaged per channel
     win_rate: number | null;
     opens: number;
     closes: number;
@@ -15,14 +15,18 @@ type RawRec = {
     source?: string;              // channel name (may be internal for CLOSE)
     gid?: string | number;
     oid?: string | number;
-    id?: string | number;         // sometimes OPENs use id
-    profit?: number | string;     // CLOSE profit
+    id?: string | number;         // sometimes OPENs use id only
+    profit?: number | string;
+    p?: number | string;
+    pnl?: number | string;
+    profit_usd?: number | string;
+    net_profit?: number | string;
     confidence?: number;          // optional per-OPEN confidence (0..100)
     score?: number;               // optional per-OPEN score
     signal_score?: number;        // optional alt name
     t?: number | string;          // unix seconds
-    ts?: number | string;         // optional alt time
-    time?: number | string;       // optional alt time
+    ts?: number | string;         // alt time
+    time?: number | string;       // alt time
 };
 
 const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
@@ -40,6 +44,18 @@ function canonicalSource(row: RawRec, opensByKey: Map<string, RawRec>): string {
 function num(x: any): number | null {
     const n = Number(x);
     return Number.isFinite(n) ? n : null;
+}
+
+// Accept multiple possible profit field names
+function pickProfit(rec: RawRec): number | null {
+    return (
+        num(rec.profit) ??
+        num(rec.p) ??
+        num(rec.pnl) ??
+        num(rec.profit_usd) ??
+        num(rec.net_profit) ??
+        null
+    );
 }
 
 function coalesceTime(rec: RawRec): number | null {
@@ -97,7 +113,7 @@ export default function ChannelPerformance({
                 opens: number;
                 closes: number;
                 wins: number;
-                totalClosed: number;
+                totalClosed: number;   // denominator for win%
                 confSum: number;
                 confN: number;
                 scoreSum: number;
@@ -124,34 +140,46 @@ export default function ChannelPerformance({
                 const act = (rec.action ?? "").toUpperCase();
                 if (act === "OPEN") {
                     acc.opens += 1;
+
                     if (typeof rec.confidence === "number") {
-                        acc.confSum += rec.confidence; acc.confN += 1;
+                        acc.confSum += rec.confidence;
+                        acc.confN += 1;
                     }
-                    const scoreVal = (typeof rec.signal_score === "number")
-                        ? rec.signal_score
-                        : (typeof rec.score === "number" ? rec.score : null);
-                    if (scoreVal !== null) { acc.scoreSum += scoreVal!; acc.scoreN += 1; }
+
+                    const scoreVal =
+                        (typeof rec.signal_score === "number" ? rec.signal_score : null) ??
+                        (typeof rec.score === "number" ? rec.score : null);
+
+                    if (scoreVal !== null) {
+                        acc.scoreSum += scoreVal!;
+                        acc.scoreN += 1;
+                    }
                 } else if (act === "CLOSE") {
                     acc.closes += 1;
-                    const p = num(rec.profit);
-                    if (p !== null) {
-                        acc.totalClosed += 1;
-                        if (p > 0) acc.wins += 1;
-                    }
+
+                    // Always count a close in the denominator (prevents "—")
+                    acc.totalClosed += 1;
+
+                    const p = pickProfit(rec);
+                    if (p !== null && p > 0) acc.wins += 1;
                 }
 
                 const tVal = coalesceTime(rec);
-                if (tVal !== null) {
-                    acc.lastT = Math.max(acc.lastT ?? 0, tVal);
-                }
+                if (tVal !== null) acc.lastT = Math.max(acc.lastT ?? 0, tVal);
             }
 
             // 3) Convert to ChanRow[]
             const out: ChanRow[] = [];
             for (const [channel, a] of byChan) {
-                const win_rate = a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
+                const win_rate =
+                    a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
+
                 const avg_confidence = a.confN > 0 ? a.confSum / a.confN : null;
-                const signal_score = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
+
+                // Fallback: if no explicit score fields, use avg confidence as "signal score"
+                const explicitScore = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
+                const signal_score =
+                    explicitScore !== null ? explicitScore : avg_confidence;
 
                 out.push({
                     channel,
@@ -168,7 +196,7 @@ export default function ChannelPerformance({
             out.sort((a, b) => {
                 const aw = a.win_rate ?? -1, bw = b.win_rate ?? -1;
                 if (bw !== aw) return bw - aw;
-                return (b.closes - a.closes);
+                return b.closes - a.closes;
             });
 
             setRows(out);
