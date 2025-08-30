@@ -12,10 +12,12 @@ export type ChanRow = {
 
 type RawRec = {
     action?: string;              // "OPEN" | "CLOSE" | ...
-    source?: string;              // channel name (may be internal for CLOSE)
+    source?: string;              // channel name (may be internal/blank for CLOSE)
+    symbol?: string;
     gid?: string | number;
     oid?: string | number;
     id?: string | number;         // sometimes OPENs use id only
+    ticket?: string | number;     // present on CLOSE
     profit?: number | string;
     p?: number | string;
     pnl?: number | string;
@@ -33,13 +35,6 @@ const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
 
 // join key: prefer gid, then oid, then id (OPENs sometimes only have id)
 const keyFor = (r: RawRec) => String(r.gid ?? r.oid ?? r.id ?? "").trim();
-
-function canonicalSource(row: RawRec, opensByKey: Map<string, RawRec>): string {
-    const k = keyFor(row);
-    const open = k ? opensByKey.get(k) : undefined;
-    const src = String(open?.source ?? row.source ?? "").trim();
-    return INTERNAL_SOURCES.has(src) ? "" : src;
-}
 
 function num(x: any): number | null {
     const n = Number(x);
@@ -71,6 +66,48 @@ function fmtWhen(t?: number | null): string | null {
     }
 }
 
+/** Decide the canonical channel for a row.
+ * 1) Prefer OPEN.source from gid/oid/id join
+ * 2) Else for CLOSE with blank key/source, use heuristic:
+ *    take the channel whose most recent OPEN in the *same symbol*
+ *    occurred before the CLOSE time.
+ */
+function canonicalSource(
+    row: RawRec,
+    opensByKey: Map<string, RawRec>,
+    latestOpenBySymbolAndChannel: Map<string, Map<string, number>>
+): string {
+    // Primary: exact join via gid/oid/id
+    const k = keyFor(row);
+    const open = k ? opensByKey.get(k) : undefined;
+    const fromJoin = String(open?.source ?? row.source ?? "").trim();
+    if (fromJoin && !INTERNAL_SOURCES.has(fromJoin)) return fromJoin;
+
+    // Heuristic: only for CLOSE rows with blank/unknown source
+    if ((row.action ?? "").toUpperCase() !== "CLOSE") return "";
+
+    const sym = (row.symbol || "").trim().toUpperCase();
+    if (!sym) return "";
+
+    const closerTs = coalesceTime(row);
+    const perChan = latestOpenBySymbolAndChannel.get(sym);
+    if (!perChan) return "";
+
+    // Find channel with the closest OPEN <= close time
+    let bestChan = "";
+    let bestTs = -1;
+    for (const [chan, ts] of perChan) {
+        if (INTERNAL_SOURCES.has(chan)) continue;
+        if (typeof ts !== "number") continue;
+        if (closerTs !== null && ts > closerTs) continue; // OPEN after CLOSE -> ignore
+        if (ts > bestTs) {
+            bestTs = ts;
+            bestChan = chan;
+        }
+    }
+    return bestChan; // may be "" if none found
+}
+
 export default function ChannelPerformance({
     selected,
     onSelect,
@@ -99,13 +136,30 @@ export default function ChannelPerformance({
                 data = [];
             }
 
-            // 1) Build OPEN index
+            // 1) Build OPEN index and "latest open by symbol & channel"
             const opensByKey = new Map<string, RawRec>();
+            const latestOpenBySymbolAndChannel = new Map<string, Map<string, number>>();
+
             for (const rec of data) {
-                if ((rec.action ?? "").toUpperCase() === "OPEN") {
-                    const k = keyFor(rec);
-                    if (k) opensByKey.set(k, rec);
+                if ((rec.action ?? "").toUpperCase() !== "OPEN") continue;
+
+                const k = keyFor(rec);
+                if (k) opensByKey.set(k, rec);
+
+                const src = String(rec.source ?? "").trim();
+                if (INTERNAL_SOURCES.has(src)) continue;
+
+                const sym = (rec.symbol || "").trim().toUpperCase();
+                const tVal = coalesceTime(rec);
+                if (!sym || tVal === null) continue;
+
+                let perChan = latestOpenBySymbolAndChannel.get(sym);
+                if (!perChan) {
+                    perChan = new Map<string, number>();
+                    latestOpenBySymbolAndChannel.set(sym, perChan);
                 }
+                const prev = perChan.get(src) ?? -1;
+                if (tVal > prev) perChan.set(src, tVal);
             }
 
             // 2) Aggregate by canonical source
@@ -124,8 +178,8 @@ export default function ChannelPerformance({
             const byChan = new Map<string, Acc>();
 
             for (const rec of data) {
-                const canon = canonicalSource(rec, opensByKey);
-                if (!canon) continue; // drop EA/GUI/WEB/blank
+                const canon = canonicalSource(rec, opensByKey, latestOpenBySymbolAndChannel);
+                if (!canon) continue; // drop EA/GUI/WEB/blank/unknown
 
                 let acc = byChan.get(canon);
                 if (!acc) {
@@ -157,7 +211,7 @@ export default function ChannelPerformance({
                 } else if (act === "CLOSE") {
                     acc.closes += 1;
 
-                    // Always count a close in the denominator (prevents "—")
+                    // Always count a close in the denominator (prevents staying at "—")
                     acc.totalClosed += 1;
 
                     const p = pickProfit(rec);
