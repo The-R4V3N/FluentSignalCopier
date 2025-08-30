@@ -88,6 +88,65 @@ else:
 SIGNALS   = (base / "Fluent_signals.jsonl").resolve()
 HEARTBEAT = (base / "fluent_heartbeat.txt").resolve()
 
+def _tail_jsonl(path, limit):
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+    except Exception:
+        return []
+    out = []
+    for line in lines[-max(1, min(limit, 20000)):]:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            pass
+    return out
+
+def _num(x):
+    try:
+        n = float(x)
+        if n != n or n in (float("inf"), float("-inf")):
+            return None
+        return n
+    except Exception:
+        return None
+
+def _ts(rec):
+    for k in ("t", "ts", "time"):
+        n = _num(rec.get(k))
+        if n is not None:
+            return int(n)
+    return None
+
+def _profit(rec):
+    for k in ("profit", "p", "pnl", "profit_usd", "net_profit"):
+        if k in rec:
+            n = _num(rec.get(k))
+            if n is not None:
+                return n
+    return None
+
+def _join_key(rec):
+    for k in ("gid", "oid", "id"):
+        v = rec.get(k)
+        s = (str(v).strip() if v is not None else "")
+        if s:
+            return s
+    return ""
+
+def _fmt_dt(ts):
+    if not ts:
+        return None
+    # Windows-safe (avoid %-m etc.)
+    try:
+        return datetime.fromtimestamp(ts).strftime("%m/%d/%Y, %I:%M:%S %p")
+    except Exception:
+        return None
+
+
 def _heartbeat_status() -> str:
     try:
         ts = int((HEARTBEAT.read_text(encoding="utf-8") or "0").strip())
@@ -234,125 +293,102 @@ def set_quality(req: QualityReq):
 @app.get("/api/channel-performance")
 def channel_performance(limit: int = 5000):
     """
-    Aggregate recent signals by source/channel.
-    Scans the last ~2MB (or 'limit' rows after slicing) for speed.
+    Minimal robust aggregation:
+    - JOIN CLOSE->OPEN via gid/oid/id to pick channel from OPEN
+    - Filter internal sources
+    - Win% from profit>0
     """
-    rows = []
-    if SIGNALS.exists():
-        try:
-            with SIGNALS.open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                sz = f.tell()
-                f.seek(max(0, sz - 2 * 1024 * 1024))  # last ~2MB
-                data = f.read().decode("utf-8", "ignore").splitlines()
-            # keep only the last 'limit' JSON lines
-            for ln in data[-limit:]:
-                ln = ln.strip()
-                if not ln:
-                    continue
-                try:
-                    rows.append(json.loads(ln))
-                except Exception:
-                    pass
-        except Exception:
-            pass
+    # Resolve your actual path here if different
+    signals_path = str(SIGNALS) if "SIGNALS" in globals() else "Fluent_signals.jsonl"
+    rows = _tail_jsonl(signals_path, max(100, min(limit, 20000)))
 
-    agg = defaultdict(lambda: {
-        "channel": "",
-        "opens": 0,
-        "closes": 0,
-        "conf_sum": 0.0,
-        "conf_n": 0,
-        "wins": 0,
-        "closed_n": 0,
-        "last_ts": 0,
-    })
-
+    # Index OPENs by join key
+    opens_by_key = {}
     for r in rows:
-        src = str(r.get("source") or "—")
-        a = (r.get("action") or "").upper()
-        t = int(r.get("t") or 0)
+        if str(r.get("action") or "").upper() != "OPEN":
+            continue
+        k = _join_key(r)
+        if k:
+            opens_by_key[k] = r
 
-        g = agg[src]
-        g["channel"] = src
+    # Aggregate
+    agg = {}  # channel -> counters
+    for r in rows:
+        a = str(r.get("action") or "").upper()
+        src = (r.get("source") or "").strip()
 
-        # avg confidence
-        conf = r.get("confidence")
-        if isinstance(conf, (int, float)):
-            g["conf_sum"] += float(conf)
-            g["conf_n"] += 1
+        # Resolve canonical channel
+        if a == "CLOSE":
+            if not src or src in INTERNAL_SOURCES:
+                k = _join_key(r)
+                if k and k in opens_by_key:
+                    src = (opens_by_key[k].get("source") or "").strip()
 
-        # last ts
-        if t and t > g["last_ts"]:
-            g["last_ts"] = t
+        # Drop internal/unknown
+        if not src or src in INTERNAL_SOURCES:
+            continue
+
+        slot = agg.get(src)
+        if not slot:
+            slot = agg[src] = {
+                "opens": 0,
+                "closes": 0,
+                "wins": 0,
+                "totalClosed": 0,
+                "confSum": 0.0,
+                "confN": 0,
+                "scoreSum": 0.0,
+                "scoreN": 0,
+                "lastT": 0,
+            }
 
         if a == "OPEN":
-            g["opens"] += 1
-            continue
+            slot["opens"] += 1
+            # confidence
+            conf = r.get("confidence")
+            if isinstance(conf, (int, float)):
+                slot["confSum"] += float(conf)
+                slot["confN"] += 1
+            # score
+            score = r.get("signal_score")
+            if not isinstance(score, (int, float)):
+                score = r.get("score")
+            if isinstance(score, (int, float)):
+                slot["scoreSum"] += float(score)
+                slot["scoreN"] += 1
 
-        if a != "CLOSE":
-            continue
+        elif a == "CLOSE":
+            slot["closes"] += 1
+            slot["totalClosed"] += 1
+            p = _profit(r)
+            if p is not None and p > 0:
+                slot["wins"] += 1
 
-        g["closes"] += 1
-        g["closed_n"] += 1
+        t = _ts(r)
+        if t is not None and t > (slot["lastT"] or 0):
+            slot["lastT"] = t
 
-        # --- WIN detection (robust) ---
-        profit = r.get("profit", None)
-        win = None
-
-        # 1) numeric profit (supports strings-as-numbers)
-        if profit is not None:
-            try:
-                p = float(profit)
-                # allow tiny rounding noise
-                if p > 1e-8:
-                    win = True
-                elif p < -1e-8:
-                    win = False
-                else:
-                    win = False  # treat pure 0 as non-win (breakeven)
-            except Exception:
-                pass
-
-        # 2) explicit outcome if present
-        if win is None:
-            outcome = str(r.get("outcome") or "").upper()
-            if outcome == "WIN":
-                win = True
-            elif outcome in ("LOSS", "LOSE"):
-                win = False
-
-        # 3) reason heuristic (just in case)
-        if win is None:
-            reason = str(r.get("reason") or "").upper()
-            if "TP" in reason or "TAKE" in reason:
-                win = True
-            elif "SL" in reason or "STOP" in reason:
-                win = False
-
-        if win:
-            g["wins"] += 1
-
+    # Build rows
     out = []
-    for src, g in agg.items():
-        avg_conf = (g["conf_sum"] / g["conf_n"]) if g["conf_n"] else None
-        win_rate = (g["wins"] / g["closed_n"] * 100.0) if g["closed_n"] else None
-        # use avg_conf as "signal score" to match desktop
-        signal_score = avg_conf
-        last_signal_iso = datetime.fromtimestamp(g["last_ts"]).isoformat(sep=" ") if g["last_ts"] else None
+    for channel, s in agg.items():
+        total = s["totalClosed"]
+        win_rate = (s["wins"] / total * 100.0) if total > 0 else None
+        avg_conf = (s["confSum"] / s["confN"]) if s["confN"] > 0 else None
+        explicit_score = (s["scoreSum"] / s["scoreN"]) if s["scoreN"] > 0 else None
+        signal_score = explicit_score if explicit_score is not None else avg_conf
 
         out.append({
-            "channel": src,
-            "signal_score": signal_score,   # %
-            "win_rate": win_rate,           # %
-            "opens": g["opens"],
-            "closes": g["closes"],
-            "avg_confidence": avg_conf,     # %
-            "last_signal": last_signal_iso,
+            "channel": channel,
+            "signal_score": round(signal_score, 1) if isinstance(signal_score, (int, float)) else None,
+            "win_rate": round(win_rate, 1) if isinstance(win_rate, (int, float)) else None,
+            "opens": int(s["opens"]),
+            "closes": int(s["closes"]),
+            "avg_confidence": round(avg_conf, 1) if isinstance(avg_conf, (int, float)) else None,
+            "last_signal": _fmt_dt(s["lastT"]) or None,
         })
 
-    # sort by last signal desc
-    out.sort(key=lambda r: (r["last_signal"] is None, r["last_signal"]), reverse=True)
+    # Sort by win% desc, then closes desc
+    out.sort(key=lambda r: ((r["win_rate"] if isinstance(r["win_rate"], (int, float)) else -1.0), r["closes"]), reverse=True)
     return JSONResponse(out)
 
 @app.get("/")
