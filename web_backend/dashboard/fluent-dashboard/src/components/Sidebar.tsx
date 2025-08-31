@@ -1,30 +1,30 @@
+// src/components/Sidebar.tsx
+import React from "react";
 import { NavLink } from "react-router-dom";
 
-export default function Sidebar() {
-    const linkBase = "block w-full text-left px-3 py-2 rounded-lg transition";
-    const active = "bg-white/10 text-white";
-    const idle = "text-white/70 hover:text-white hover:bg-white/5";
+const linkClass = ({ isActive }: { isActive: boolean }) =>
+    [
+        "block px-3 py-2 rounded-lg transition select-none",
+        isActive
+            ? "bg-[var(--surface)] text-[var(--text)] font-semibold"
+            : "text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--surface-2)]",
+    ].join(" ");
 
+export default function Sidebar() {
     return (
-        <aside className="w-56 shrink-0 p-4 border-r border-white/10 bg-black/20">
-            <div className="mb-4 text-sm font-semibold text-white/70">
+        <aside className="w-56 shrink-0 p-4 border-r token-border bg-[var(--surface-2)]">
+            <div className="mb-4 text-sm font-semibold text-[var(--muted)]">
                 Fluent Signal Copier
             </div>
 
-            {/* force vertical layout */}
-            <nav className="flex flex-col gap-2">
-                <NavLink to="/dashboard" end
-                    className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
+            <nav className="space-y-2">
+                <NavLink to="/dashboard" end className={linkClass}>
                     Dashboard
                 </NavLink>
-
-                <NavLink to="/history"
-                    className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
+                <NavLink to="/history" className={linkClass}>
                     History
                 </NavLink>
-
-                <NavLink to="/settings"
-                    className={({ isActive }) => `${linkBase} ${isActive ? active : idle}`}>
+                <NavLink to="/settings" className={linkClass}>
                     Settings
                 </NavLink>
             </nav>

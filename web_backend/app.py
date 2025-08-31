@@ -2,42 +2,25 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
 from pydantic import BaseModel
-import asyncio, json, time, os, sys
-from collections import defaultdict
+
+from pathlib import Path
 from datetime import datetime
+import asyncio, json, time, os, sys, glob, platform
+from collections import defaultdict
 
-
-# Load .env if present
+# --- Optional .env loading ----------------------------------------------------
 try:
     from dotenv import load_dotenv
     load_dotenv()
-except ImportError:
-    # safe fallback: .env support optional
+except Exception:
     pass
 
+# -----------------------------------------------------------------------------
+# FastAPI init + CORS
+# -----------------------------------------------------------------------------
 app = FastAPI(title="Fluent Web Backend")
 
-# Resolve MT5 paths
-MT5_FILES_DIR = os.getenv("MT5_FILES_DIR")
-if not MT5_FILES_DIR:
-    # optional fallback: user’s home
-    MT5_FILES_DIR = str(Path.home() / "MQL5" / "Files")
-
-SIGNALS = Path(MT5_FILES_DIR) / "Fluent_signals.jsonl"
-HEARTBEAT = Path(MT5_FILES_DIR) / "fluent_heartbeat.txt"
-
-# simple in-memory state (persist if you want later)
-STATE = {"running": False, "paused": False, "quality": 60}
-
-class PauseReq(BaseModel):
-    paused: bool
-
-class QualityReq(BaseModel):
-    threshold: int
-
-# CORS (adjust for your frontend port if needed)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
@@ -46,8 +29,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# -----------------------------------------------------------------------------
+# Server-side settings persisted for the web UI (Telegram creds, MT5 dir, etc.)
+# -----------------------------------------------------------------------------
+SETTINGS_JSON = Path(os.getenv("WEB_SETTINGS_JSON") or Path.cwd() / "web_settings.json")
+
+class BridgeSettings(BaseModel):
+    api_id: str | None = None
+    api_hash: str | None = None
+    phone: str | None = None
+    mt5_dir: str | None = None
+    sources: list[str] = []
+
+def _load_server_settings() -> BridgeSettings:
+    if SETTINGS_JSON.exists():
+        try:
+            return BridgeSettings(**json.loads(SETTINGS_JSON.read_text()))
+        except Exception:
+            pass
+    return BridgeSettings()
+
+SERVER_SETTINGS = _load_server_settings()
+
+# Treat these as internal/system sources when aggregating performance
+INTERNAL_SOURCES = {"WEB", "GUI", "EA", "SYSTEM", "LOCAL", "", None}
+
+# -----------------------------------------------------------------------------
+# Helpers for locating MT5 MQL5\Files folder
+# -----------------------------------------------------------------------------
 def _uniq_paths(paths):
-    seen=set(); out=[]
+    seen = set(); out = []
     for p in paths:
         try:
             rp = p.resolve()
@@ -59,14 +70,14 @@ def _uniq_paths(paths):
 
 def _auto_detect_mt5_files() -> Path | None:
     """Best-effort scan for a likely MQL5\\Files folder (Windows)."""
-    cands = []
-    for env in ("APPDATA","LOCALAPPDATA"):
-        base = Path(os.getenv(env,"")) / "MetaQuotes" / "Terminal"
+    cands: list[Path] = []
+    for env in ("APPDATA", "LOCALAPPDATA"):
+        base = Path(os.getenv(env, "")) / "MetaQuotes" / "Terminal"
         if base.exists():
             cands += [d / "MQL5" / "Files" for d in base.glob("*")]
             cands.append(base / "Common" / "Files")
-    for pf in ("PROGRAMFILES","PROGRAMFILES(X86)"):
-        base = Path(os.getenv(pf,""))
+    for pf in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
+        base = Path(os.getenv(pf, ""))
         if base.exists():
             cands.append(base / "MetaTrader 5" / "MQL5" / "Files")
             cands += list(base.glob("MetaTrader*/*/MQL5/Files"))
@@ -78,16 +89,38 @@ def _auto_detect_mt5_files() -> Path | None:
         pass
     return cands[0] if cands else None
 
-# Resolve paths (env -> auto-detect -> home fallback)
-MT5_FILES_DIR = os.getenv("MT5_FILES_DIR")
-if MT5_FILES_DIR:
-    base = Path(MT5_FILES_DIR)
+# -----------------------------------------------------------------------------
+# Resolve base path for MT5 Files with precedence:
+#   1) ENV MT5_FILES_DIR
+#   2) saved web_settings.json (mt5_dir)
+#   3) auto-detect
+#   4) fallback to ~/MQL5/Files
+# -----------------------------------------------------------------------------
+env_mt5 = os.getenv("MT5_FILES_DIR")
+if env_mt5 and Path(env_mt5).exists():
+    base = Path(env_mt5)
+elif SERVER_SETTINGS.mt5_dir and Path(SERVER_SETTINGS.mt5_dir).exists():
+    base = Path(SERVER_SETTINGS.mt5_dir)
 else:
     base = _auto_detect_mt5_files() or (Path.home() / "MQL5" / "Files")
 
 SIGNALS   = (base / "Fluent_signals.jsonl").resolve()
 HEARTBEAT = (base / "fluent_heartbeat.txt").resolve()
 
+def _set_mt5_dir(new_dir: str) -> bool:
+    """Update global base/SIGNALS/HEARTBEAT at runtime if folder exists."""
+    global base, SIGNALS, HEARTBEAT
+    p = Path(new_dir)
+    if not p.exists():
+        return False
+    base = p
+    SIGNALS = (base / "Fluent_signals.jsonl").resolve()
+    HEARTBEAT = (base / "fluent_heartbeat.txt").resolve()
+    return True
+
+# -----------------------------------------------------------------------------
+# Misc helpers
+# -----------------------------------------------------------------------------
 def _tail_jsonl(path, limit):
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -95,7 +128,7 @@ def _tail_jsonl(path, limit):
     except Exception:
         return []
     out = []
-    for line in lines[-max(1, min(limit, 20000)):]:
+    for line in lines[-max(1, min(limit, 20000)):] :
         line = line.strip()
         if not line:
             continue
@@ -140,12 +173,10 @@ def _join_key(rec):
 def _fmt_dt(ts):
     if not ts:
         return None
-    # Windows-safe (avoid %-m etc.)
     try:
         return datetime.fromtimestamp(ts).strftime("%m/%d/%Y, %I:%M:%S %p")
     except Exception:
         return None
-
 
 def _heartbeat_status() -> str:
     try:
@@ -157,6 +188,14 @@ def _heartbeat_status() -> str:
     except Exception:
         return "dead"
 
+# -----------------------------------------------------------------------------
+# Simple in-memory UI state
+# -----------------------------------------------------------------------------
+STATE = {"running": False, "paused": False, "quality": 60}
+
+# -----------------------------------------------------------------------------
+# API: health / paths / metrics / signals
+# -----------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
     return {"ok": True, "version": "1.0", "py": sys.version.split()[0]}
@@ -171,6 +210,7 @@ def paths():
         "signals_exists": SIGNALS.exists(),
         "heartbeat_exists": HEARTBEAT.exists(),
         "env_MT5_FILES_DIR": os.getenv("MT5_FILES_DIR") or "",
+        "saved_settings": _load_server_settings().dict(),
     }
 
 @app.get("/api/metrics")
@@ -179,15 +219,14 @@ def metrics():
     opens = closes = mods = modtp = emerg = 0
     try:
         if SIGNALS.exists():
-            # Tail last ~1000 lines quickly
             with SIGNALS.open("rb") as f:
                 f.seek(0, os.SEEK_END)
                 sz = f.tell()
-                f.seek(max(0, sz - 512*1024))  # last 512KB
-                data = f.read().decode("utf-8","ignore").splitlines()[-1000:]
+                f.seek(max(0, sz - 512 * 1024))  # last 512KB
+                data = f.read().decode("utf-8", "ignore").splitlines()[-1000:]
             for ln in data:
                 try:
-                    a = json.loads(ln).get("action","")
+                    a = json.loads(ln).get("action", "")
                 except Exception:
                     continue
                 if a == "OPEN": opens += 1
@@ -212,8 +251,8 @@ def signals(limit: int = 200):
             with SIGNALS.open("rb") as f:
                 f.seek(0, os.SEEK_END)
                 sz = f.tell()
-                f.seek(max(0, sz - 1024*1024))  # last 1MB
-                data = f.read().decode("utf-8","ignore").splitlines()
+                f.seek(max(0, sz - 1024 * 1024))  # last 1MB
+                data = f.read().decode("utf-8", "ignore").splitlines()
             for ln in data[-limit:]:
                 try:
                     rows.append(json.loads(ln))
@@ -223,34 +262,46 @@ def signals(limit: int = 200):
             pass
     return JSONResponse(rows)
 
+# -----------------------------------------------------------------------------
+# API: emergency close
+# -----------------------------------------------------------------------------
 @app.post("/api/emergency-close-all")
 def emergency_close_all():
     gid = int(time.time() * 1000)
-    rec = {"action":"EMERGENCY_CLOSE_ALL","id":str(gid),"t":int(time.time()),"source":"WEB","confirm":"YES"}
+    rec = {"action": "EMERGENCY_CLOSE_ALL", "id": str(gid), "t": int(time.time()), "source": "WEB", "confirm": "YES"}
     SIGNALS.parent.mkdir(parents=True, exist_ok=True)
     with SIGNALS.open("a", encoding="utf-8") as f:
         f.write(json.dumps(rec) + "\n"); f.flush(); os.fsync(f.fileno())
     return {"ok": True, "gid": gid}
 
+# -----------------------------------------------------------------------------
+# Websocket: stream new JSONL lines (auto-handles rotation & path changes)
+# -----------------------------------------------------------------------------
 @app.websocket("/ws")
 async def ws_events(ws: WebSocket):
     await ws.accept()
-    # Tail with rotation/creation handling
     last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
+    last_path = str(SIGNALS)
     try:
         while True:
             await asyncio.sleep(0.8)
+
+            # if path changed at runtime (mt5_dir switched), reset
+            if str(SIGNALS) != last_path:
+                last_path = str(SIGNALS)
+                last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
+
             if not SIGNALS.exists():
                 last_size = 0
                 continue
+
             size = SIGNALS.stat().st_size
-            # If file shrank (rotation/truncate), reset pointer
             if size < last_size:
-                last_size = 0
+                last_size = 0  # rotation/truncate
             if size > last_size:
                 with SIGNALS.open("rb") as f:
                     f.seek(last_size)
-                    chunk = f.read(size - last_size).decode("utf-8","ignore")
+                    chunk = f.read(size - last_size).decode("utf-8", "ignore")
                 last_size = size
                 for ln in chunk.splitlines():
                     ln = ln.strip()
@@ -258,10 +309,18 @@ async def ws_events(ws: WebSocket):
                         await ws.send_text(ln)
     except WebSocketDisconnect:
         return
-    
+
+# -----------------------------------------------------------------------------
+# API: basic state controls
+# -----------------------------------------------------------------------------
+class PauseReq(BaseModel):
+    paused: bool
+
+class QualityReq(BaseModel):
+    threshold: int
+
 @app.get("/api/state")
 def get_state():
-    # reflect heartbeat too (nice for UI)
     return {
         "running": STATE["running"],
         "paused": STATE["paused"],
@@ -290,6 +349,9 @@ def set_quality(req: QualityReq):
     STATE["quality"] = q
     return {"ok": True, **STATE}
 
+# -----------------------------------------------------------------------------
+# API: Channel performance aggregation
+# -----------------------------------------------------------------------------
 @app.get("/api/channel-performance")
 def channel_performance(limit: int = 5000):
     """
@@ -298,9 +360,7 @@ def channel_performance(limit: int = 5000):
     - Filter internal sources
     - Win% from profit>0
     """
-    # Resolve your actual path here if different
-    signals_path = str(SIGNALS) if "SIGNALS" in globals() else "Fluent_signals.jsonl"
-    rows = _tail_jsonl(signals_path, max(100, min(limit, 20000)))
+    rows = _tail_jsonl(str(SIGNALS), max(100, min(limit, 20000)))
 
     # Index OPENs by join key
     opens_by_key = {}
@@ -312,12 +372,12 @@ def channel_performance(limit: int = 5000):
             opens_by_key[k] = r
 
     # Aggregate
-    agg = {}  # channel -> counters
+    agg = {}
     for r in rows:
         a = str(r.get("action") or "").upper()
         src = (r.get("source") or "").strip()
 
-        # Resolve canonical channel
+        # Resolve canonical channel (map CLOSE back to its OPEN if needed)
         if a == "CLOSE":
             if not src or src in INTERNAL_SOURCES:
                 k = _join_key(r)
@@ -344,18 +404,14 @@ def channel_performance(limit: int = 5000):
 
         if a == "OPEN":
             slot["opens"] += 1
-            # confidence
             conf = r.get("confidence")
             if isinstance(conf, (int, float)):
-                slot["confSum"] += float(conf)
-                slot["confN"] += 1
-            # score
+                slot["confSum"] += float(conf); slot["confN"] += 1
             score = r.get("signal_score")
             if not isinstance(score, (int, float)):
                 score = r.get("score")
             if isinstance(score, (int, float)):
-                slot["scoreSum"] += float(score)
-                slot["scoreN"] += 1
+                slot["scoreSum"] += float(score); slot["scoreN"] += 1
 
         elif a == "CLOSE":
             slot["closes"] += 1
@@ -368,7 +424,6 @@ def channel_performance(limit: int = 5000):
         if t is not None and t > (slot["lastT"] or 0):
             slot["lastT"] = t
 
-    # Build rows
     out = []
     for channel, s in agg.items():
         total = s["totalClosed"]
@@ -387,10 +442,54 @@ def channel_performance(limit: int = 5000):
             "last_signal": _fmt_dt(s["lastT"]) or None,
         })
 
-    # Sort by win% desc, then closes desc
     out.sort(key=lambda r: ((r["win_rate"] if isinstance(r["win_rate"], (int, float)) else -1.0), r["closes"]), reverse=True)
     return JSONResponse(out)
 
+# -----------------------------------------------------------------------------
+# API: Web settings (GET/POST) + MT5 auto-detect
+# -----------------------------------------------------------------------------
+@app.get("/api/settings")
+def get_settings():
+    s = _load_server_settings()
+    return {
+        "api_id": s.api_id or "",
+        "api_hash": s.api_hash or "",
+        "phone": s.phone or "",
+        "mt5_dir": s.mt5_dir or str(base),
+        "sources": s.sources or [],
+    }
+
+@app.post("/api/settings")
+def save_settings(s: BridgeSettings):
+    current = _load_server_settings()
+
+    # if mt5_dir provided and different, try to apply live
+    if s.mt5_dir and s.mt5_dir != current.mt5_dir:
+        _set_mt5_dir(s.mt5_dir)
+
+    SETTINGS_JSON.write_text(json.dumps({
+        "api_id": s.api_id if s.api_id is not None else current.api_id,
+        "api_hash": s.api_hash if s.api_hash is not None else current.api_hash,
+        "phone": s.phone if s.phone is not None else current.phone,
+        "mt5_dir": s.mt5_dir if s.mt5_dir is not None else (current.mt5_dir or str(base)),
+        "sources": s.sources if s.sources else (current.sources or []),
+    }, indent=2))
+
+    return {"ok": True, "mt5_dir": str(base)}
+
+@app.get("/api/mt5/auto_detect")
+def auto_detect_mt5_dir():
+    env = os.getenv("MT5_FILES_DIR")
+    if env and Path(env).exists():
+        return {"ok": True, "mt5_dir": str(Path(env))}
+    cand = _auto_detect_mt5_files()
+    if cand:
+        return {"ok": True, "mt5_dir": str(cand)}
+    return {"ok": False, "mt5_dir": None}
+
+# -----------------------------------------------------------------------------
+# Root
+# -----------------------------------------------------------------------------
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Fluent Signal Copier API"}

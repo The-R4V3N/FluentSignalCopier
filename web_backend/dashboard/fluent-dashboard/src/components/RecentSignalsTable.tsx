@@ -2,35 +2,38 @@ export type Rec = {
     t?: number; action?: string; symbol?: string; side?: string;
     order_type?: string; entry?: number; entry_ref?: number;
     sl?: number; tps?: number[]; source?: string;
-    // add fields used elsewhere:
     confidence?: number;
     new_sl?: number; new_tps_csv?: string; tp_slot?: number; tp_to?: number;
 };
 
+function actionColorVar(action?: string, side?: string): string {
+    const A = (action || "").toUpperCase();
+    const S = (side || "").toUpperCase();
+
+    // You can map these to the user-configurable vars from Settings (ThemeProvider)
+    // and provide fallbacks if they aren't defined yet.
+    if (A === "OPEN") {
+        if (S === "BUY") return "var(--signal-buy, #22c55e)";   // default green
+        if (S === "SELL") return "var(--signal-sell, #ef4444)";  // default red
+        return "var(--signal-open, #3b82f6)";                    // generic open fallback (blue)
+    }
+    if (A === "CLOSE") return "var(--signal-close, #ef4444)";
+    if (A === "MODIFY") return "var(--signal-modify, #3b82f6)";
+    if (A === "MODIFY_TP") return "var(--signal-modify-tp, #9333ea)";
+    if (A === "EMERGENCY_CLOSE_ALL") return "var(--signal-emergency, #dc267f)";
+    return "var(--signal-neutral, rgba(255,255,255,0.8))";
+}
+
+/** Make a translucent background tint from a base color using color-mix() */
+function bgTintStyle(color: string, opacityPercent = 18): React.CSSProperties {
+    // color-mix has solid weight first; we mix N% of the color with transparent
+    // Example: color-mix(in srgb, var(--signal-buy) 18%, transparent)
+    return {
+        backgroundColor: `color-mix(in srgb, ${color} ${opacityPercent}%, transparent)`
+    };
+}
+
 export default function RecentSignalsTable({ rows }: { rows: Rec[] }) {
-
-    const tint = (a?: string) => {
-        switch ((a || "").toUpperCase()) {
-            case "OPEN": return "bg-[rgba(34,197,94,0.2)]";                 // green
-            case "CLOSE": return "bg-[rgba(239,68,68,0.2)]";                // red
-            case "MODIFY": return "bg-[rgba(59,130,246,0.2)]";              // blue
-            case "MODIFY_TP": return "bg-[rgba(147,51,234,0.2)]";           // purple
-            case "EMERGENCY_CLOSE_ALL": return "bg-[rgba(220,38,127,0.2)]"; // pink
-            default: return "";
-        }
-    };
-
-    const actionClass = (a?: string) => {
-        switch ((a || "").toUpperCase()) {
-            case "OPEN": return "font-semibold text-[rgb(34,197,94)]";          // green-500
-            case "CLOSE": return "font-semibold text-[rgb(239,68,68)]";         // red-500
-            case "MODIFY": return "font-semibold text-[rgb(59,130,246)]";       // blue-500
-            case "MODIFY_TP": return "font-semibold text-[rgb(147,51,234)]";    // purple-600
-            case "EMERGENCY_CLOSE_ALL": return "font-semibold text-[rgb(220,38,127)]"; // pink-600
-            default: return "font-semibold text-white/80";
-        }
-    };
-
     return (
         <div className="rounded-xl border border-white/10 overflow-hidden">
             <table className="w-full text-sm leading-6">
@@ -41,6 +44,7 @@ export default function RecentSignalsTable({ rows }: { rows: Rec[] }) {
                         ))}
                     </tr>
                 </thead>
+
                 <tbody className="[&>tr:nth-child(odd)]:bg-white/[0.02]">
                     {rows.map((r, i) => {
                         const time = r.t ? new Date(r.t * 1000).toLocaleTimeString() : "—";
@@ -52,13 +56,23 @@ export default function RecentSignalsTable({ rows }: { rows: Rec[] }) {
                             ? (r.entry_ref ? `MARKET (${r.entry_ref})` : "MARKET")
                             : r.order_type ? `${r.order_type} @ ${r.entry ?? ""}` : (r.entry ?? "");
 
+                        const baseColor = actionColorVar(r.action, r.side);
+
                         return (
                             <tr
                                 key={i}
-                                className={`border-t border-white/5 ${tint(r.action)} hover:bg-white/10 transition-colors`}
+                                className="border-t border-white/5 transition-colors"
+                                style={bgTintStyle(baseColor, 18)}
                             >
                                 <td className="px-3 py-2">{time}</td>
-                                <td className={`px-3 py-2 ${actionClass(r.action)}`}>{r.action}</td>
+
+                                <td
+                                    className="px-3 py-2 font-semibold"
+                                    style={{ color: baseColor }}
+                                >
+                                    {r.action}
+                                </td>
+
                                 <td className="px-3 py-2">{r.symbol}</td>
                                 <td className="px-3 py-2">{r.side || ""}</td>
                                 <td className="px-3 py-2 tabular-nums">{entry}</td>

@@ -1,3 +1,4 @@
+// src/pages/History.tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 import RecentSignalsTable from "../components/RecentSignalsTable";
 import type { Rec } from "../components/RecentSignalsTable";
@@ -5,20 +6,16 @@ import ChannelPerformance from "../components/ChannelPerformance";
 import StatCard from "../components/StatCard";
 import { useWebSocketFeed } from "../hooks/useWebSocketFeed";
 
-/* === NEW: helpers for canonical source attribution === */
+/* === Canonical source attribution (OPEN is truth) === */
 type Row = Rec & { action?: string; gid?: string; oid?: string; source?: string };
-
 const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
 const keyFor = (r: Row) => (r.gid || r.oid || "").trim();
-
 function canonicalSource(row: Row, opensByKey: Map<string, Row>): string {
     const k = keyFor(row);
     const open = k ? opensByKey.get(k) : undefined;
-    // Prefer OPEN.source (truth), then row.source; strip internals
     const src = (open?.source || row.source || "").trim();
     return INTERNAL_SOURCES.has(src) ? "" : src;
 }
-/* ===================================================== */
 
 export default function HistoryPage() {
     const [rows, setRows] = useState<Rec[]>([]);
@@ -31,13 +28,15 @@ export default function HistoryPage() {
     const [totals, setTotals] = useState({ opens: 0, closes: 0, channels: 0 });
 
     useEffect(() => {
+        document.title = "Fluent Signal Copier — History";
+    }, []);
+
+    useEffect(() => {
         (async () => {
-            const data = await fetch("http://127.0.0.1:8000/api/signals?limit=200").then(r => r.json());
+            const data = await fetch("/api/signals?limit=200").then(r => r.json());
             setRows(Array.isArray(data) ? data : []);
         })();
     }, []);
-
-    document.title = "Fluent Signal Copier — History";
 
     const onMsg = useCallback((rec: Rec) => {
         if (paused) return;
@@ -46,7 +45,7 @@ export default function HistoryPage() {
 
     useWebSocketFeed(onMsg);
 
-    /* === NEW: Build opens index from current rows === */
+    // Build opens index
     const opensByKey = useMemo(() => {
         const m = new Map<string, Row>();
         for (const r of rows as Row[]) {
@@ -58,18 +57,13 @@ export default function HistoryPage() {
         return m;
     }, [rows]);
 
-    /* === NEW: Canonicalize sources for all rows (display layer only) === */
+    // Canonicalize sources for display
     const rowsCanon: Row[] = useMemo(() => {
         return (rows as Row[])
-            .map(r => {
-                const src = canonicalSource(r, opensByKey);
-                // Rewrite source for UI, drop internal/blank sources
-                return { ...r, source: src };
-            })
-            .filter(r => !!r.source); // hide internal (EA/GUI/WEB) and blanks
+            .map(r => ({ ...r, source: canonicalSource(r, opensByKey) }))
+            .filter(r => !!r.source);
     }, [rows, opensByKey]);
 
-    /* === CHANGED: filter using canonicalized source === */
     const filteredRows = useMemo(() => {
         if (!selectedChannel) return rowsCanon;
         return rowsCanon.filter(r => (r.source || "") === selectedChannel);
@@ -77,25 +71,27 @@ export default function HistoryPage() {
 
     return (
         <div className="p-6 space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-xl font-semibold">History</h1>
+            <h1 className="text-xl font-semibold">History</h1>
+
+            {/* Controls bar */}
+            <div className="card p-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                     {selectedChannel && (
                         <button
-                            className="rounded-lg px-3 py-1.5 bg-white/10 hover:bg-white/15 text-white/90"
+                            className="px-3 py-1.5 rounded-lg border token-border bg-[var(--surface-2)]"
                             onClick={() => setSelectedChannel(null)}
                             title="Clear channel filter"
                         >
                             Clear filter: <span className="ml-1 font-semibold">{selectedChannel}</span>
                         </button>
                     )}
-                    <button
-                        className={`rounded-lg px-3 py-2 ${paused ? "bg-amber-600" : "bg-sky-600"} hover:opacity-90 text-white`}
-                        onClick={() => setPaused(p => !p)}
-                    >
-                        {paused ? "Resume feed" : "Pause feed"}
-                    </button>
                 </div>
+                <button
+                    className="px-3 py-2 rounded-lg border token-border"
+                    onClick={() => setPaused(p => !p)}
+                >
+                    {paused ? "Resume feed" : "Pause feed"}
+                </button>
             </div>
 
             {/* KPI cards */}
@@ -121,18 +117,19 @@ export default function HistoryPage() {
                 }}
             />
 
-            {/* Recent signals (filtered) */}
-            <div>
-                <div className="mb-2 flex items-center justify-between">
-                    <h2 className="text-white/80">Recent Signals</h2>
+            {/* Recent signals */}
+            <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold">Recent Signals</h2>
                     {selectedChannel && (
-                        <span className="text-sm text-white/60">
-                            Filtering by <span className="font-semibold text-white/80">{selectedChannel}</span>
+                        <span className="muted text-sm">
+                            Filtering by <span className="font-semibold text-[var(--text)]">{selectedChannel}</span>
                         </span>
                     )}
                 </div>
-                {/* NOTE: RecentSignalsTable will now receive rows where source is canonicalized */}
-                <RecentSignalsTable rows={filteredRows as Rec[]} />
+                <div className="card overflow-hidden">
+                    <RecentSignalsTable rows={filteredRows as Rec[]} />
+                </div>
             </div>
         </div>
     );

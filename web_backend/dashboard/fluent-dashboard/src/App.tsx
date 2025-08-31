@@ -1,3 +1,4 @@
+// App.tsx
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import Sidebar from "./components/Sidebar";
 import Dashboard from "./pages/Dashboard";
@@ -6,7 +7,8 @@ import SettingsPage from "./pages/Settings";
 
 function Shell() {
   return (
-    <div className="min-h-screen bg-[#0b0b0e] text-white flex">
+    // ⬇️ remove bg-[#0b0b0e] and text-white, use token-based class
+    <div className="min-h-screen app-bg flex transition-colors">
       <Sidebar />
       <main className="flex-1">
         <Outlet />

@@ -1,16 +1,35 @@
-import type { ReactNode } from "react";
+// components/StatCard.tsx
+import React from "react";
+
+type Dot = "green" | "red" | "yellow" | undefined;
 
 export default function StatCard({
-    title, value, dot = "gray"
-}: { title: string; value: ReactNode; dot?: "gray" | "green" | "yellow" | "red" }) {
-    const dotColor = { gray: "bg-gray-500", green: "bg-emerald-500", yellow: "bg-amber-500", red: "bg-rose-500" }[dot];
+    title,
+    value,
+    dot,
+}: {
+    title: string;
+    value: React.ReactNode;
+    dot?: Dot;
+}) {
+    const dotCls =
+        dot === "green"
+            ? "bg-emerald-500"
+            : dot === "yellow"
+                ? "bg-amber-500"
+                : dot === "red"
+                    ? "bg-rose-500"
+                    : "bg-neutral-400";
+
     return (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-center gap-2 text-sm text-white/70">
-                <span>{title}</span>
-                {dot && <span className={`h-2 w-2 rounded-full ${dotColor}`} />}
+        <div className="rounded-2xl border p-4 bg-[var(--card-bg)] border-[var(--card-border)]">
+            <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
+                <span className={`h-2 w-2 rounded-full ${dotCls}`} />
+                <span className="font-medium">{title}</span>
             </div>
-            <div className="mt-2 text-3xl font-semibold">{value}</div>
+            <div className="mt-2 text-3xl font-semibold leading-none text-[var(--text)]">
+                {value}
+            </div>
         </div>
     );
 }
