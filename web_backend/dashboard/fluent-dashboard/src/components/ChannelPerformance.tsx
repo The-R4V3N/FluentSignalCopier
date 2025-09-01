@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { api } from "../lib/api";
 
 export type ChanRow = {
@@ -109,11 +109,7 @@ function canonicalSource(
     return bestChan; // may be "" if none found
 }
 
-export default function ChannelPerformance({
-    selected,
-    onSelect,
-    onSummary,
-}: {
+type Props = {
     selected?: string | null;
     onSelect?: (channel: string | null) => void;
     onSummary?: (s: {
@@ -121,12 +117,24 @@ export default function ChannelPerformance({
         bestByScore?: ChanRow | null;
         totals: { opens: number; closes: number; channels: number };
     }) => void;
-}) {
+};
+
+/** ChannelPerformance
+ * - Props are optional for backward-compat (`Dashboard` can render without handlers).
+ * - Renders mobile cards on small screens, table on md+.
+ */
+export default function ChannelPerformance({
+    selected = null,
+    onSelect,
+    onSummary,
+}: Props) {
     const [rows, setRows] = useState<ChanRow[]>([]);
     const polling = useRef<number | null>(null);
 
     // Poll raw signals and compute channel stats on the client
     useEffect(() => {
+        let cancelled = false;
+
         const fetchAndBuild = async () => {
             let data: RawRec[] = [];
             try {
@@ -136,6 +144,7 @@ export default function ChannelPerformance({
             } catch {
                 data = [];
             }
+            if (cancelled) return;
 
             // 1) Build OPEN index and "latest open by symbol & channel"
             const opensByKey = new Map<string, RawRec>();
@@ -261,6 +270,7 @@ export default function ChannelPerformance({
         fetchAndBuild();
         polling.current = window.setInterval(fetchAndBuild, 5000);
         return () => {
+            cancelled = true;
             if (polling.current) window.clearInterval(polling.current);
         };
     }, []);
@@ -287,10 +297,16 @@ export default function ChannelPerformance({
 
     useEffect(() => {
         onSummary?.(summary);
-    }, [summary]); // eslint-disable-line
+    }, [summary, onSummary]);
 
-    const isBestWin = (r: ChanRow) => summary.bestByWin && r.channel === summary.bestByWin.channel;
-    const isBestScore = (r: ChanRow) => summary.bestByScore && r.channel === summary.bestByScore.channel;
+    const isBestWin = useCallback(
+        (r: ChanRow) => summary.bestByWin && r.channel === summary.bestByWin.channel,
+        [summary.bestByWin]
+    );
+    const isBestScore = useCallback(
+        (r: ChanRow) => summary.bestByScore && r.channel === summary.bestByScore.channel,
+        [summary.bestByScore]
+    );
 
     const rowTint = (r: ChanRow) =>
         selected === r.channel
@@ -309,7 +325,51 @@ export default function ChannelPerformance({
     return (
         <div className="space-y-2">
             <h2 className="text-white/80">Channel Performance</h2>
-            <div className="overflow-hidden rounded-2xl border border-white/10">
+
+            {/* Mobile: Card list */}
+            <ul className="md:hidden space-y-3">
+                {rows.map((r, i) => (
+                    <li
+                        key={i}
+                        className={`rounded-2xl border border-white/10 bg-black/20 p-3 ${rowTint(r)}`}
+                        onClick={() => onRowClick(r)}
+                    >
+                        <div className="font-medium flex items-center gap-2">
+                            <span className="truncate">{r.channel}</span>
+                            {isBestWin(r) && (
+                                <span className="rounded px-1.5 py-0.5 text-[11px] bg-emerald-600/20 text-emerald-300">
+                                    Top Win%
+                                </span>
+                            )}
+                            {isBestScore(r) && (
+                                <span className="rounded px-1.5 py-0.5 text-[11px] bg-sky-600/20 text-sky-300">
+                                    Top Score
+                                </span>
+                            )}
+                            {selected === r.channel && (
+                                <span className="rounded px-1.5 py-0.5 text-[11px] bg-white/20 text-white/90">
+                                    Selected
+                                </span>
+                            )}
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-1 text-sm text-zinc-300">
+                            <div><span className="text-zinc-400">Score:</span> {typeof r.signal_score === "number" ? `${r.signal_score.toFixed(1)}%` : "—"}</div>
+                            <div><span className="text-zinc-400">Win rate:</span> {fmtPct(r.win_rate)}</div>
+                            <div><span className="text-zinc-400">Opens/Closes:</span> {r.opens}/{r.closes}</div>
+                            <div><span className="text-zinc-400">Avg conf:</span> {typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}</div>
+                            <div className="col-span-2"><span className="text-zinc-400">Last:</span> {r.last_signal ?? "—"}</div>
+                        </div>
+                    </li>
+                ))}
+                {!rows.length && (
+                    <li className="rounded-2xl border border-white/10 bg-black/20 p-3 text-white/60">
+                        No data yet.
+                    </li>
+                )}
+            </ul>
+
+            {/* Desktop: Table */}
+            <div className="hidden md:block overflow-hidden rounded-2xl border border-white/10">
                 <table className="w-full text-sm leading-6">
                     <thead className="sticky top-0 bg-black/40 backdrop-blur supports-[backdrop-filter]:bg-black/30">
                         <tr className="text-left text-white/70">
@@ -328,7 +388,7 @@ export default function ChannelPerformance({
                             >
                                 <td className="px-3 py-2">
                                     <div className="flex items-center gap-2">
-                                        <span>{r.channel}</span>
+                                        <span className="truncate">{r.channel}</span>
                                         {isBestWin(r) && (
                                             <span className="rounded px-1.5 py-0.5 text-[11px] bg-emerald-600/20 text-emerald-300">
                                                 Top Win%

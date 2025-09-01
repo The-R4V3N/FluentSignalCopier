@@ -1,7 +1,6 @@
 // src/pages/History.tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
-import RecentSignalsTable from "../components/RecentSignalsTable";
-import type { Rec } from "../components/RecentSignalsTable";
+import RecentSignalsTable, { type Rec } from "../components/RecentSignalsTable";
 import ChannelPerformance from "../components/ChannelPerformance";
 import StatCard from "../components/StatCard";
 import { useWebSocketFeed } from "../hooks/useWebSocketFeed";

@@ -194,3 +194,26 @@ textarea {
     background-color: color-mix(in srgb, var(--surface) 65%, transparent);
     backdrop-filter: blur(8px);
   }
+
+    /* Better tap feel on mobile */
+    * {
+      -webkit-tap-highlight-color: rgba(255, 255, 255, 0.08);
+    }
+  
+    /* iOS momentum scroll for drawers/lists */
+    aside,
+    nav,
+    .overflow-y-auto {
+      -webkit-overflow-scrolling: touch;
+    }
+  
+    /* Prevent viewport jump when sticky bars appear */
+    html,
+    body {
+      overscroll-behavior-y: none;
+    }
+
+    /* Prevent viewport jump when sticky bars appear */
+    #root {
+      overscroll-behavior-y: none;
+    }
