@@ -1,5 +1,5 @@
 // src/pages/Settings.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useThemeSettings } from "../theme/ThemeProvider";
 
 type BridgeSettings = {

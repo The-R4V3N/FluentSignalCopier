@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../lib/api";
 
 export type ChanRow = {
     channel: string;
@@ -129,7 +130,7 @@ export default function ChannelPerformance({
         const fetchAndBuild = async () => {
             let data: RawRec[] = [];
             try {
-                const r = await fetch("http://127.0.0.1:8000/api/signals?limit=500");
+                const r = await fetch(api("/api/signals?limit=500"));
                 const json = await r.json();
                 data = Array.isArray(json) ? (json as RawRec[]) : [];
             } catch {

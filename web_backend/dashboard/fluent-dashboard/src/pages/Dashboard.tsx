@@ -3,6 +3,7 @@ import StatCard from "../components/StatCard";
 import type { Rec } from "../components/RecentSignalsTable";
 import ControlsBar from "../components/ControlsBar";
 import { useWebSocketFeed } from "../hooks/useWebSocketFeed";
+import { API_BASE } from "../config"; // 👈 dynamic API base
 
 type Metrics = { heartbeat: "ok" | "stale" | "dead" | string; counts: Record<string, number> };
 
@@ -16,9 +17,9 @@ export default function Dashboard() {
     useEffect(() => {
         (async () => {
             const [m, s, st] = await Promise.all([
-                fetch("http://127.0.0.1:8000/api/metrics").then(r => r.json()),
-                fetch("http://127.0.0.1:8000/api/signals?limit=200").then(r => r.json()),
-                fetch("http://127.0.0.1:8000/api/state").then(r => r.json()).catch(() => null),
+                fetch(`${API_BASE}/api/metrics`).then(r => r.json()),
+                fetch(`${API_BASE}/api/signals?limit=200`).then(r => r.json()),
+                fetch(`${API_BASE}/api/state`).then(r => r.json()).catch(() => null),
             ]);
             document.title = "Fluent Signal Copier — Dashboard";
             setMetrics(m);
@@ -29,7 +30,6 @@ export default function Dashboard() {
             }
         })();
     }, []);
-
 
     // live feed
     const onMsg = useCallback((rec: Rec) => {
@@ -74,21 +74,21 @@ export default function Dashboard() {
     const modTpDot = metrics.counts.modify_tp > 0 ? "green" : "red";
     const qltDot = qualityRef.current >= 60 ? "green" : qualityRef.current >= 30 ? "yellow" : "red";
 
-    // actions → hit  endpoints
+    // actions → hit endpoints
     const api = {
-        start: () => fetch("http://127.0.0.1:8000/api/start", { method: "POST" }).then(() => { }),
-        stop: () => fetch("http://127.0.0.1:8000/api/stop", { method: "POST" }).then(() => { }),
+        start: () => fetch(`${API_BASE}/api/start`, { method: "POST" }).then(() => { }),
+        stop: () => fetch(`${API_BASE}/api/stop`, { method: "POST" }).then(() => { }),
         pauseIntake: (p: boolean) =>
-            fetch("http://127.0.0.1:8000/api/pause", {
+            fetch(`${API_BASE}/api/pause`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ paused: p }),
             }).then(() => setPaused(p)),
         emergency: () =>
-            fetch("http://127.0.0.1:8000/api/emergency-close-all", { method: "POST" }),
+            fetch(`${API_BASE}/api/emergency-close-all`, { method: "POST" }),
         setQuality: (q: number) => {
             qualityRef.current = q;
-            fetch("http://127.0.0.1:8000/api/set-quality", {
+            fetch(`${API_BASE}/api/set-quality`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ threshold: q }),

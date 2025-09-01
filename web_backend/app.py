@@ -1,6 +1,7 @@
 # backend/app.py
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -487,6 +488,20 @@ def auto_detect_mt5_dir():
         return {"ok": True, "mt5_dir": str(cand)}
     return {"ok": False, "mt5_dir": None}
 
+# -----------------------------------------------------------------------------
+# Static SPA (serve built React dashboard from /app)
+# -----------------------------------------------------------------------------
+DIST = Path(__file__).parent / "dist"     # put your built frontend here
+
+if DIST.exists():
+    # serve hashed assets (JS/CSS) under /assets
+    app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
+    @app.get("/app")
+    def serve_app_index():
+        """Single-page app entry (kept at /app so / stays API JSON)."""
+        return FileResponse(DIST / "index.html")
+    
 # -----------------------------------------------------------------------------
 # Root
 # -----------------------------------------------------------------------------

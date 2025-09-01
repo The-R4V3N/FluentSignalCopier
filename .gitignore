@@ -261,4 +261,4 @@ desktop.ini
 requirements*.txt
 
 # Ignore web_settings.json
-web_settings.json
+/web_backend/web_settings.json
