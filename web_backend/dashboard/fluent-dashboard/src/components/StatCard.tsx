@@ -1,35 +1,17 @@
-// components/StatCard.tsx
 import React from "react";
 
-type Dot = "green" | "red" | "yellow" | undefined;
-
-export default function StatCard({
-    title,
-    value,
-    dot,
-}: {
+type Props = {
     title: string;
     value: React.ReactNode;
-    dot?: Dot;
-}) {
-    const dotCls =
-        dot === "green"
-            ? "bg-emerald-500"
-            : dot === "yellow"
-                ? "bg-amber-500"
-                : dot === "red"
-                    ? "bg-rose-500"
-                    : "bg-neutral-400";
+    subtitle?: React.ReactNode;
+};
 
+export default function StatCard({ title, value, subtitle }: Props) {
     return (
-        <div className="rounded-2xl border p-4 bg-[var(--card-bg)] border-[var(--card-border)]">
-            <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-                <span className={`h-2 w-2 rounded-full ${dotCls}`} />
-                <span className="font-medium">{title}</span>
-            </div>
-            <div className="mt-2 text-3xl font-semibold leading-none text-[var(--text)]">
-                {value}
-            </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-sm">
+            <div className="text-white/70 text-sm">{title}</div>
+            <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
+            {subtitle ? <div className="mt-1 text-xs text-white/60">{subtitle}</div> : null}
         </div>
     );
 }

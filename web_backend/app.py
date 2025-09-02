@@ -7,8 +7,8 @@ from pydantic import BaseModel
 
 from pathlib import Path
 from datetime import datetime
-import asyncio, json, time, os, sys, glob, platform
-from collections import defaultdict
+from typing import Optional, List, Iterable
+import asyncio, json, time, os, sys, re
 
 # --- Optional .env loading ----------------------------------------------------
 try:
@@ -36,11 +36,11 @@ app.add_middleware(
 SETTINGS_JSON = Path(os.getenv("WEB_SETTINGS_JSON") or Path.cwd() / "web_settings.json")
 
 class BridgeSettings(BaseModel):
-    api_id: str | None = None
-    api_hash: str | None = None
-    phone: str | None = None
-    mt5_dir: str | None = None
-    sources: list[str] = []
+    api_id: Optional[str] = None
+    api_hash: Optional[str] = None
+    phone: Optional[str] = None
+    mt5_dir: Optional[str] = None
+    sources: List[str] = []
 
 def _load_server_settings() -> BridgeSettings:
     if SETTINGS_JSON.exists():
@@ -58,31 +58,38 @@ INTERNAL_SOURCES = {"WEB", "GUI", "EA", "SYSTEM", "LOCAL", "", None}
 # -----------------------------------------------------------------------------
 # Helpers for locating MT5 MQL5\Files folder
 # -----------------------------------------------------------------------------
-def _uniq_paths(paths):
-    seen = set(); out = []
+def _uniq_paths(paths: Iterable[Path]) -> List[Path]:
+    seen = set(); out: List[Path] = []
     for p in paths:
         try:
-            rp = p.resolve()
+            rp = Path(p).resolve()
             if rp not in seen and rp.exists():
                 seen.add(rp); out.append(rp)
         except Exception:
             pass
     return out
 
-def _auto_detect_mt5_files() -> Path | None:
-    """Best-effort scan for a likely MQL5\\Files folder (Windows)."""
-    cands: list[Path] = []
+def _auto_detect_mt5_files() -> Optional[Path]:
+    """Best-effort scan for a likely MQL5\\Files folder (primarily Windows)."""
+    cands: List[Path] = []
+
+    # Common Windows user locations
     for env in ("APPDATA", "LOCALAPPDATA"):
         base = Path(os.getenv(env, "")) / "MetaQuotes" / "Terminal"
         if base.exists():
             cands += [d / "MQL5" / "Files" for d in base.glob("*")]
             cands.append(base / "Common" / "Files")
+
+    # Program Files installs
     for pf in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
         base = Path(os.getenv(pf, ""))
         if base.exists():
             cands.append(base / "MetaTrader 5" / "MQL5" / "Files")
-            cands += list(base.glob("MetaTrader*/*/MQL5/Files"))
+            cands += list(base.glob("MetaTrader*/**/MQL5/Files"))
+
+    # Generic fallback
     cands.append(Path.home() / "MQL5" / "Files")
+
     cands = _uniq_paths(cands)
     try:
         cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
@@ -91,11 +98,7 @@ def _auto_detect_mt5_files() -> Path | None:
     return cands[0] if cands else None
 
 # -----------------------------------------------------------------------------
-# Resolve base path for MT5 Files with precedence:
-#   1) ENV MT5_FILES_DIR
-#   2) saved web_settings.json (mt5_dir)
-#   3) auto-detect
-#   4) fallback to ~/MQL5/Files
+# Resolve base path for MT5 Files with precedence
 # -----------------------------------------------------------------------------
 env_mt5 = os.getenv("MT5_FILES_DIR")
 if env_mt5 and Path(env_mt5).exists():
@@ -106,38 +109,150 @@ else:
     base = _auto_detect_mt5_files() or (Path.home() / "MQL5" / "Files")
 
 SIGNALS   = (base / "Fluent_signals.jsonl").resolve()
-HEARTBEAT = (base / "fluent_heartbeat.txt").resolve()
+HEARTBEAT = (base / "Fluent_heartbeat.txt").resolve()
 
+# -----------------------------------------------------------------------------
+# Snapshot scanning & selection
+# -----------------------------------------------------------------------------
+_PATTERNS = [
+    "*Fluent_positions*.json*",
+    "*position*.json*",
+    "*positions*.json*",
+    "*snapshot*.json*",
+]
+
+def _terminal_root_from_files_dir(files_dir: Path) -> Optional[Path]:
+    """
+    Given .../MetaQuotes/Terminal/<hash>/MQL5/Files, return .../MetaQuotes/Terminal.
+    Works even if files_dir is Common/Files or a custom path.
+    """
+    try:
+        parts = [p.name.lower() for p in files_dir.parts]
+        if "terminal" in parts:
+            idx = len(parts) - 1 - parts[::-1].index("terminal")
+            return Path(*files_dir.parts[:idx+1])
+    except Exception:
+        pass
+    return None
+
+def _candidate_roots(files_dir: Path) -> List[Path]:
+    """Return directories to scan: configured Files dir, Common\\Files, and sibling terminals' Files."""
+    roots: List[Path] = [files_dir]
+    term_root = _terminal_root_from_files_dir(files_dir)
+    if term_root:
+        common = term_root / "Common" / "Files"
+        if common.exists():
+            roots.append(common)
+        for d in term_root.glob("*/MQL5/Files"):
+            try:
+                if d.resolve() != files_dir.resolve():
+                    roots.append(d)
+            except Exception:
+                continue
+    return _uniq_paths(roots)
+
+def _scan_position_files(files_dir: Path) -> List[Path]:
+    """Recursively find plausible snapshot files under candidate roots; newest first."""
+    roots = _candidate_roots(files_dir)
+    found: List[Path] = []
+    for r in roots:
+        for pat in _PATTERNS:
+            try:
+                for p in r.rglob(pat):
+                    if p.is_file():
+                        found.append(p)
+            except Exception:
+                continue
+    # dedupe
+    seen = set(); uniq: List[Path] = []
+    for p in found:
+        try:
+            rp = p.resolve()
+            if rp not in seen:
+                seen.add(rp); uniq.append(rp)
+        except Exception:
+            continue
+    try:
+        uniq.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    except Exception:
+        pass
+    return uniq
+
+def _pick_best_snapshot(files_dir: Path) -> Optional[Path]:
+    """
+    Choose the newest snapshot, but prioritize filenames your EA uses.
+    """
+    # 1) Fast-path: explicit filenames in the configured Files dir
+    priority = [
+        files_dir / "positions_snapshot.json",  # your EA
+        files_dir / "fluent_positions.json",
+        files_dir / "fluent_position.json",
+        files_dir / "positions.json",
+    ]
+    for cand in priority:
+        try:
+            if cand.exists() and cand.is_file():
+                txt = _read_text_multi(cand)
+                if txt.strip():
+                    return cand
+        except Exception:
+            pass
+
+    # 2) Fallback: recursive scan across candidate roots
+    for cand in _scan_position_files(files_dir):
+        try:
+            txt = _read_text_multi(cand)
+            if txt.strip():
+                return cand
+        except Exception:
+            continue
+    return None
+
+# -----------------------------------------------------------------------------
+# Update base at runtime
+# -----------------------------------------------------------------------------
 def _set_mt5_dir(new_dir: str) -> bool:
-    """Update global base/SIGNALS/HEARTBEAT at runtime if folder exists."""
     global base, SIGNALS, HEARTBEAT
     p = Path(new_dir)
     if not p.exists():
         return False
     base = p
     SIGNALS = (base / "Fluent_signals.jsonl").resolve()
-    HEARTBEAT = (base / "fluent_heartbeat.txt").resolve()
+    HEARTBEAT = (base / "Fluent_heartbeat.txt").resolve()
     return True
+
+# -----------------------------------------------------------------------------
+# Text reading helpers (handle UTF-16/UTF-8/CP1252 etc.)
+# -----------------------------------------------------------------------------
+_ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "cp1252")
+
+def _read_text_multi(path: Path) -> str:
+    last_err = None
+    for enc in _ENCODINGS:
+        try:
+            return path.read_text(encoding=enc, errors="strict")
+        except Exception as e:
+            last_err = e
+            continue
+    # be permissive fallback (ignore undecodable bytes)
+    try:
+        return path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return ""
 
 # -----------------------------------------------------------------------------
 # Misc helpers
 # -----------------------------------------------------------------------------
 def _tail_jsonl(path, limit):
     try:
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            sz = f.tell()
+            f.seek(max(0, sz - 1024 * 1024))  # last 1MB
+            data = f.read().decode("utf-8", "ignore").splitlines()
+        return [json.loads(ln) for ln in data[-limit:] if ln.strip()]
     except Exception:
         return []
-    out = []
-    for line in lines[-max(1, min(limit, 20000)):] :
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            out.append(json.loads(line))
-        except Exception:
-            pass
-    return out
 
 def _num(x):
     try:
@@ -156,7 +271,7 @@ def _ts(rec):
     return None
 
 def _profit(rec):
-    for k in ("profit", "p", "pnl", "profit_usd", "net_profit"):
+    for k in ("profit_usd", "profit", "p", "pnl", "net_profit"):
         if k in rec:
             n = _num(rec.get(k))
             if n is not None:
@@ -179,15 +294,98 @@ def _fmt_dt(ts):
     except Exception:
         return None
 
-def _heartbeat_status() -> str:
+def _heartbeat_status():
     try:
-        ts = int((HEARTBEAT.read_text(encoding="utf-8") or "0").strip())
+        if not HEARTBEAT.exists():
+            return "dead"
+        raw = _read_text_multi(HEARTBEAT)
+        # Keep digits only; support ms or s
+        digits = re.findall(r"\d+", raw)
+        if not digits:
+            return "dead"
+        ts = int(digits[0])
+        # If ts looks like ms, convert
+        if ts > 10_000_000_000:  # > ~ 2286-11-20 in seconds
+            ts //= 1000
         age = time.time() - ts
         if age < 15:  return "ok"
         if age < 60:  return "stale"
         return "dead"
     except Exception:
         return "dead"
+
+# ---------------------------------------------------------------------------
+# JSON parsing helpers for positions files
+# ---------------------------------------------------------------------------
+def _parse_positions_json(text: str) -> List[dict]:
+    """
+    Accept either:
+      - a top-level list of positions: [ {...}, {...} ]
+      - or an object with an array field: { "positions": [ ... ] } / { "data": [...] } / { "items": [...] }
+    Return a list (possibly empty).
+    """
+    try:
+        if not text or not text.strip():
+            return []
+        data = json.loads(text)
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("positions", "data", "items"):
+                val = data.get(key)
+                if isinstance(val, list):
+                    return val
+    except Exception:
+        pass
+    return []
+
+# ---------------------------------------------------------------------------
+# Positions & PnL helpers (use selector each time)
+# ---------------------------------------------------------------------------
+def _load_open_positions_count() -> int:
+    """Count entries in the most recent valid snapshot (authoritative MT5 state)."""
+    try:
+        cand = _pick_best_snapshot(base)
+        if not cand or not cand.exists():
+            return 0
+        text = _read_text_multi(cand)
+        lst = _parse_positions_json(text)
+        return len(lst)
+    except Exception:
+        return 0
+
+def _pnl_30d_usd() -> float:
+    """Sum profit_usd (or profit) from CLOSE lines within last 30 days."""
+    try:
+        if not SIGNALS.exists():
+            return 0.0
+        cutoff = time.time() - 30*24*3600
+        total = 0.0
+        with SIGNALS.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            sz = f.tell()
+            f.seek(max(0, sz - 2*1024*1024))  # last 2MB
+            data = f.read().decode("utf-8", "ignore").splitlines()
+        for ln in data:
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            if str(r.get("action") or "").upper() != "CLOSE":
+                continue
+            ts = _ts(r)
+            if ts is not None and ts < cutoff:
+                continue
+            p = _profit(r)
+            if p is None:
+                continue
+            try:
+                total += float(p or 0)
+            except Exception:
+                pass
+        return round(total, 2)
+    except Exception:
+        return 0.0
 
 # -----------------------------------------------------------------------------
 # Simple in-memory UI state
@@ -203,13 +401,16 @@ def health():
 
 @app.get("/api/paths")
 def paths():
+    best = _pick_best_snapshot(base)
     return {
         "mt5_files_dir": str(base),
         "signals": str(SIGNALS),
         "heartbeat": str(HEARTBEAT),
+        "positions": str(best) if best else "",
         "heartbeat_status": _heartbeat_status(),
         "signals_exists": SIGNALS.exists(),
         "heartbeat_exists": HEARTBEAT.exists(),
+        "positions_exists": bool(best and best.exists()),
         "env_MT5_FILES_DIR": os.getenv("MT5_FILES_DIR") or "",
         "saved_settings": _load_server_settings().dict(),
     }
@@ -238,30 +439,42 @@ def metrics():
     except Exception:
         pass
 
+    open_positions = _load_open_positions_count()
+    pnl30 = _pnl_30d_usd()
+
+    counts = {
+        "open": opens, "close": closes, "modify": mods, "modify_tp": modtp, "emergency": emerg,
+        "open_positions": open_positions
+    }
+
     return {
         "heartbeat": hb,
-        "counts": {"open": opens, "close": closes, "modify": mods, "modify_tp": modtp, "emergency": emerg},
+        "counts": counts,
         "state": STATE,
+        "open_positions": open_positions,
+        "pnl_30d": pnl30,
+        "pnl": pnl30,     # compat alias
+        "pnl30": pnl30,   # compat alias
     }
 
 @app.get("/api/signals")
 def signals(limit: int = 200):
-    rows = []
-    if SIGNALS.exists():
-        try:
-            with SIGNALS.open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                sz = f.tell()
-                f.seek(max(0, sz - 1024 * 1024))  # last 1MB
-                data = f.read().decode("utf-8", "ignore").splitlines()
-            for ln in data[-limit:]:
-                try:
-                    rows.append(json.loads(ln))
-                except Exception:
-                    pass
-        except Exception:
-            pass
-    return JSONResponse(rows)
+    return JSONResponse(_tail_jsonl(str(SIGNALS), limit))
+
+# ---------------------------------------------------------------------------
+# API: current open positions (from EA snapshot)
+# ---------------------------------------------------------------------------
+@app.get("/api/positions")
+def api_positions():
+    try:
+        cand = _pick_best_snapshot(base)
+        if not cand or not cand.exists():
+            return JSONResponse([])
+        text = _read_text_multi(cand)
+        lst = _parse_positions_json(text)
+        return JSONResponse(lst)
+    except Exception:
+        return JSONResponse([])
 
 # -----------------------------------------------------------------------------
 # API: emergency close
@@ -501,7 +714,7 @@ if DIST.exists():
     def serve_app_index():
         """Single-page app entry (kept at /app so / stays API JSON)."""
         return FileResponse(DIST / "index.html")
-    
+
 # -----------------------------------------------------------------------------
 # Root
 # -----------------------------------------------------------------------------

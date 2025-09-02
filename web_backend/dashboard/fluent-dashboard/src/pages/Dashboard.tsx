@@ -1,50 +1,59 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api, type Metrics } from "../api";
 import StatCard from "../components/StatCard";
-import ControlsBar from "../components/ControlsBar";
-import RecentSignalsTable from "../components/RecentSignalsTable";
+
+function formatPnl(n: number | null | undefined) {
+    if (typeof n !== "number" || !isFinite(n)) return "—";
+    const sign = n >= 0 ? "+" : "−";
+    const abs = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${sign}$${abs}`;
+}
 
 export default function Dashboard() {
-    const [paused, setPaused] = useState(false);
+    const [metrics, setMetrics] = useState<Metrics | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        let alive = true;
+
+        const load = async () => {
+            try {
+                const m = await api.getMetrics();
+                if (!alive) return;
+                setMetrics(m);
+                setError(null);
+            } catch (e: any) {
+                if (!alive) return;
+                setError(e?.message || "Failed to load metrics");
+            }
+        };
+
+        load();
+        const id = setInterval(load, 2000);
+        return () => {
+            alive = false;
+            clearInterval(id);
+        };
+    }, []);
+
+    const openPositions = metrics?.open_positions ?? 0;
+    const pnl30 = metrics?.pnl_30d ?? null;
 
     return (
-        <>
-            {/* KPI cards */}
-            <section className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                <StatCard title="Active Channels" value="12" />
-                <StatCard title="Win Rate (30d)" value="74%" />
-                <StatCard title="PnL (30d)" value="+$1,920" />
-                <StatCard title="Open Positions" value="3" />
-            </section>
+        <div className="px-6 py-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <StatCard title="Active Channels" value={12} /> {/* keep as-is if you calculate elsewhere */}
+                <StatCard title="Win Rate (30d)" value="74%" /> {/* replace with your real computation when ready */}
+                <StatCard title="PnL (30d)" value={formatPnl(pnl30)} />
+                <StatCard title="Open Positions" value={openPositions} />
+            </div>
 
-            {/* Controls */}
-            <div className="md:mt-4 h-16" aria-hidden />{/* spacer for potential sticky bar */}
-            <ControlsBar
-                paused={paused}
-                onStart={() => setPaused(false)}
-                onStop={() => setPaused(true)}
-                onTogglePause={() => setPaused(p => !p)}
-                qualityDefault={60}
-                onQualityChange={() => { }}
-            />
-
-            {/* Data sections */}
-            <section className="mt-6 grid grid-cols-1 xl:grid-cols-5 gap-4">
-                <div className="xl:col-span-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
-                        <div className="mb-2 sm:mb-3 font-medium">Recent Signals</div>
-                        {/* Wire real rows later; empty array now satisfies the prop */}
-                        <RecentSignalsTable rows={[]} />
-                    </div>
+            {/* ...rest of your dashboard (controls, recent signals, etc.) */}
+            {error && (
+                <div className="mt-4 text-sm text-red-400">
+                    {error}
                 </div>
-                <div className="xl:col-span-2">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
-                        <div className="mb-2 sm:mb-3 font-medium">Channel Performance</div>
-                        {/* History page renders the interactive table; here you can
-               add a compact widget or leave blank */}
-                        <div className="text-sm text-white/60">Open History to explore channel stats.</div>
-                    </div>
-                </div>
-            </section>
-        </>
+            )}
+        </div>
     );
 }
