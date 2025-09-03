@@ -1,18 +1,15 @@
 export type Metrics = {
     heartbeat: "ok" | "stale" | "dead";
     counts: {
-        open: number;
-        close: number;
-        modify: number;
-        modify_tp: number;
-        emergency: number;
+        open: number; close: number; modify: number; modify_tp: number; emergency: number;
         open_positions: number;
     };
     state: { running: boolean; paused: boolean; quality: number };
     open_positions: number;
     pnl_30d: number;
-    pnl: number;
-    pnl30: number;
+    pnl: number;      // alias
+    pnl30: number;    // alias
+    win_rate_30d?: number;
 };
 
 export type Paths = {

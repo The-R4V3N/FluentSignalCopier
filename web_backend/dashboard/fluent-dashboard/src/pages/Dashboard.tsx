@@ -52,6 +52,7 @@ export default function Dashboard() {
     const openPositions = positions.length;          // authoritative count from /api/positions
     const pnl30 = metrics?.pnl_30d ?? null;          // 30d PnL from /api/metrics
     const quality = metrics?.state?.quality ?? 60;
+    const winRate = metrics?.win_rate_30d ?? null;
 
     return (
         <>
@@ -59,7 +60,10 @@ export default function Dashboard() {
             <section className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                 {/* These two are placeholders until wired to real data */}
                 <StatCard title="Active Channels" value="12" />
-                <StatCard title="Win Rate (30d)" value="74%" />
+                <StatCard
+                    title="Win Rate (30d)"
+                    value={winRate !== null ? `${winRate.toFixed(1)}%` : "—"}
+                />
 
                 <StatCard title="PnL (30d)" value={formatPnl(pnl30)} />
                 <StatCard title="Open Positions" value={openPositions} />
