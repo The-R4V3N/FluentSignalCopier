@@ -383,7 +383,7 @@ def _pnl_30d_usd() -> float:
             ts = _ts(r)
             if ts is not None and ts < cutoff:
                 continue
-            p = _profit_usd_only(r)
+            p = _profit(r)
             if p is None:
                 continue
             try:
@@ -393,6 +393,65 @@ def _pnl_30d_usd() -> float:
         return round(total, 2)
     except Exception:
         return 0.0
+
+def _profit_usd_or_any(rec):
+    """
+    Return a numeric profit from a CLOSE record, or None.
+    Preference: profit_usd, then net_profit, pnl, profit.
+    """
+    for k in ("profit_usd", "net_profit", "pnl", "profit"):
+        v = rec.get(k)
+        try:
+            n = float(v)
+            if n == n and n not in (float("inf"), float("-inf")):
+                return n
+        except Exception:
+            continue
+    return None
+
+
+def _win_rate_30d() -> float | None:
+    """
+    Win% over the last 30 days from CLOSE lines that have a numeric profit.
+    Returns a float in [0..100], or None if no qualifying closes exist.
+    """
+    try:
+        if not SIGNALS.exists():
+            return None
+        cutoff = time.time() - 30 * 24 * 3600
+        wins = 0
+        total = 0
+        with SIGNALS.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            sz = f.tell()
+            f.seek(max(0, sz - 2 * 1024 * 1024))  # last 2MB
+            data = f.read().decode("utf-8", "ignore").splitlines()
+
+        for ln in data:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                r = json.loads(ln)
+            except Exception:
+                continue
+            if str(r.get("action") or "").upper() != "CLOSE":
+                continue
+            ts = _ts(r)
+            if ts is None or ts < cutoff:
+                continue
+            p = _profit_usd_or_any(r)
+            if p is None:
+                continue  # only count closes with numeric profit
+            total += 1
+            if p > 0:
+                wins += 1
+
+        if total == 0:
+            return None
+        return round((wins / total) * 100, 1)
+    except Exception:
+        return None
 
 # -----------------------------------------------------------------------------
 # Simple in-memory UI state
@@ -448,6 +507,7 @@ def metrics():
 
     open_positions = _load_open_positions_count()
     pnl30 = _pnl_30d_usd()
+    win30 = _win_rate_30d()   # <-- NEW
 
     counts = {
         "open": opens, "close": closes, "modify": mods, "modify_tp": modtp, "emergency": emerg,
@@ -460,8 +520,10 @@ def metrics():
         "state": STATE,
         "open_positions": open_positions,
         "pnl_30d": pnl30,
-        "pnl": pnl30,     # compat alias
-        "pnl30": pnl30,   # compat alias
+        "pnl": pnl30,           # compat alias
+        "pnl30": pnl30,         # compat alias
+        "win_rate_30d": win30,
+        "winrate": win30,       # optional alias for convenience
     }
 
 @app.get("/api/signals")
