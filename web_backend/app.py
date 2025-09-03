@@ -282,12 +282,8 @@ def _ts(rec):
     return None
 
 def _profit(rec):
-    for k in ("profit_usd", "profit", "p", "pnl", "net_profit"):
-        if k in rec:
-            n = _num(rec.get(k))
-            if n is not None:
-                return n
-    return None
+    n = rec.get("profit_usd")
+    return float(n) if n is not None else None
 
 def _join_key(rec):
     for k in ("gid", "oid", "id"):
@@ -387,7 +383,7 @@ def _pnl_30d_usd() -> float:
             ts = _ts(r)
             if ts is not None and ts < cutoff:
                 continue
-            p = _profit(r)
+            p = _profit_usd_only(r)
             if p is None:
                 continue
             try:
