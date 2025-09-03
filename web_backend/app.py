@@ -251,6 +251,52 @@ def _read_text_multi(path: Path) -> str:
     except Exception:
         return ""
 
+# --- Channels aggregation -----------------------------------------------------
+from dataclasses import dataclass, asdict
+
+@dataclass
+class ChanAgg:
+    opens: int = 0
+    closes: int = 0
+    wins: int = 0
+    last_signal_ts: int | None = None
+    last_signal_iso: str | None = None
+    last_action: str | None = None
+    last_symbol: str | None = None
+    avg_conf_sum: float = 0.0
+    avg_conf_n: int = 0
+
+def _iter_jsonl(path: Path):
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            s = line.strip()
+            if not s:
+                continue
+            try:
+                yield json.loads(s)
+            except Exception:
+                # ignore malformed jsonl rows
+                continue
+
+def _safe_int(v, default=None):
+    try:
+        if isinstance(v, (int, float)):
+            return int(v)
+        return int(str(v))
+    except Exception:
+        return default
+
+def _safe_float(v, default=None):
+    try:
+        return float(v)
+    except Exception:
+        try:
+            return float(str(v).replace(',', '.'))
+        except Exception:
+            return default
+
 # -----------------------------------------------------------------------------
 # Misc helpers
 # -----------------------------------------------------------------------------
@@ -769,6 +815,84 @@ def auto_detect_mt5_dir():
     if cand:
         return {"ok": True, "mt5_dir": str(cand)}
     return {"ok": False, "mt5_dir": None}
+
+@app.get("/api/channels")
+def api_channels(limit: int = 100):
+    """
+    Aggregate real channel stats from Fluent_signals.jsonl.
+    Returns: { channels: [{channel, opens, closes, win_rate, avg_confidence, last_signal, last_action, last_symbol}], updated_at }
+    """
+    if "SIGNALS" not in globals():
+        return JSONResponse({"channels": [], "updated_at": datetime.utcnow().isoformat()+"Z"})
+
+    aggs: dict[str, ChanAgg] = {}
+
+    for rec in _iter_jsonl(SIGNALS):
+        # expected fields commonly present in your pipeline
+        action = (rec.get("action") or "").upper()  # "OPEN", "CLOSE", ...
+        source = (rec.get("source") or "").strip()  # channel name
+        if not source:
+            # Some CLOSE lines historically missed source; skip those
+            continue
+
+        ts = _safe_int(rec.get("t")) or _safe_int(rec.get("time"))
+        sym = rec.get("symbol")
+        conf = _safe_float(rec.get("confidence"))
+
+        agg = aggs.setdefault(source, ChanAgg())
+
+        if action == "OPEN":
+            agg.opens += 1
+            if conf is not None:
+                agg.avg_conf_sum += conf
+                agg.avg_conf_n += 1
+
+        elif action == "CLOSE":
+            agg.closes += 1
+            profit = _safe_float(rec.get("profit"))
+            if profit is not None and profit > 0:
+                agg.wins += 1
+
+        # track last seen info
+        if ts is not None and (agg.last_signal_ts is None or ts > agg.last_signal_ts):
+            agg.last_signal_ts = ts
+            try:
+                agg.last_signal_iso = datetime.utcfromtimestamp(ts).isoformat() + "Z"
+            except Exception:
+                agg.last_signal_iso = None
+            agg.last_action = action
+            agg.last_symbol = sym
+
+    rows = []
+    for ch, a in aggs.items():
+        win_rate = None
+        if a.closes > 0:
+            win_rate = round(100.0 * a.wins / a.closes, 2)
+
+        avg_conf = None
+        if a.avg_conf_n > 0:
+            avg_conf = round(a.avg_conf_sum / a.avg_conf_n, 2)
+
+        rows.append({
+            "channel": ch,
+            "opens": a.opens,
+            "closes": a.closes,
+            "win_rate": win_rate,
+            "avg_confidence": avg_conf,
+            "last_signal": a.last_signal_iso,
+            "last_action": a.last_action,
+            "last_symbol": a.last_symbol,
+        })
+
+    # sort by most recent activity, then by closes desc
+    rows.sort(key=lambda r: (r["last_signal"] is None, r["last_signal"]), reverse=True)
+    if limit and limit > 0:
+        rows = rows[:limit]
+
+    return JSONResponse({
+        "channels": rows,
+        "updated_at": datetime.utcnow().isoformat() + "Z"
+    })
 
 # -----------------------------------------------------------------------------
 # Static SPA (serve built React dashboard from /app)
