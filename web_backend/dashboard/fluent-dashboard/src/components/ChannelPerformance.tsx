@@ -42,16 +42,8 @@ function num(x: any): number | null {
     return Number.isFinite(n) ? n : null;
 }
 
-// Accept multiple possible profit field names
 function pickProfit(rec: RawRec): number | null {
-    return (
-        num(rec.profit) ??
-        num(rec.p) ??
-        num(rec.pnl) ??
-        num(rec.profit_usd) ??
-        num(rec.net_profit) ??
-        null
-    );
+    return num(rec.profit_usd) ?? null;
 }
 
 function coalesceTime(rec: RawRec): number | null {
