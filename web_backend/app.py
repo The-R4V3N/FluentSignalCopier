@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Iterable
+from typing import Optional, List, Iterable, Dict, Any
 import asyncio, json, time, os, sys, re
 
 # --- Optional .env loading ----------------------------------------------------
@@ -366,6 +366,42 @@ def _heartbeat_status():
         return "dead"
     except Exception:
         return "dead"
+    
+def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    rows: List[Dict[str, Any]] = []
+    # Efficient-ish tail read
+    try:
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            block = 4096
+            data = b""
+            while len(rows) < limit and f.tell() > 0:
+                seek = max(0, f.tell() - block)
+                f.seek(seek)
+                chunk = f.read(min(block, f.tell()))
+                f.seek(seek)
+                data = chunk + data
+                if seek == 0:
+                    break
+                f.seek(seek)
+            # split lines and parse JSON
+            for line in data.splitlines()[::-1]:  # newest last in file -> iterate from end
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line.decode("utf-8", errors="ignore"))
+                    rows.append(obj)
+                except Exception:
+                    continue
+                if len(rows) >= limit:
+                    break
+    except Exception:
+        return []
+    return rows
 
 # ---------------------------------------------------------------------------
 # JSON parsing helpers for positions files
@@ -893,6 +929,44 @@ def api_channels(limit: int = 100):
         "channels": rows,
         "updated_at": datetime.utcnow().isoformat() + "Z"
     })
+
+@app.get("/api/history")
+def api_history(limit: int = 100):
+    """
+    Return the last `limit` signals from Fluent_signals.jsonl, newest first.
+    Shape matches frontend `Rec` as closely as possible.
+    """
+    limit = max(1, min(int(limit), 500))  # safety clamp
+    raw = read_last_jsonl(SIGNALS, limit)
+
+    # normalize common fields into your RecentSignalsTable Rec shape
+    def norm(r: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "t": r.get("t") or r.get("time") or r.get("timestamp"),
+            "action": r.get("action"),
+            "symbol": r.get("symbol"),
+            "side": r.get("side"),
+            "order_type": r.get("order_type") or r.get("type"),
+            "entry": r.get("entry") or r.get("price") or r.get("entry_price"),
+            "entry_ref": r.get("entry_ref"),
+            "sl": r.get("sl") or r.get("stop_loss") or r.get("stoploss"),
+            "tps": (
+                r.get("tps")
+                or r.get("tp_list")
+                or ([r.get("tp")] if isinstance(r.get("tp"), (int, float)) else None)
+            ),
+            "source": r.get("source") or r.get("channel"),
+            "confidence": r.get("confidence"),
+            "new_sl": r.get("new_sl"),
+            "new_tps_csv": r.get("new_tps_csv"),
+            "tp_slot": r.get("tp_slot"),
+            "tp_to": r.get("tp_to"),
+        }
+
+    items = [norm(x) for x in raw]
+    # ensure newest first (some tails already return newest-first; we sort anyway)
+    items.sort(key=lambda x: x.get("t") or 0, reverse=True)
+    return {"items": items}
 
 # -----------------------------------------------------------------------------
 # Static SPA (serve built React dashboard from /app)
