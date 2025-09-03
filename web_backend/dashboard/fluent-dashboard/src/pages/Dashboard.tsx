@@ -112,25 +112,15 @@ export default function Dashboard() {
             />
 
             {/* Data sections */}
-            <section className="mt-6 grid grid-cols-1 xl:grid-cols-5 gap-4">
-                <div className="xl:col-span-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
-                        <div className="mb-2 sm:mb-3 font-medium">Recent Signals</div>
-                        {/* Wire real rows later; empty array now satisfies the prop */}
-                        <RecentSignalsTable rows={[]} />
-                    </div>
-                </div>
-                <div className="xl:col-span-2">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
-                        <div className="mb-2 sm:mb-3 font-medium">Channel Performance</div>
-                        {/* History page renders the interactive table; here you can add a compact widget or leave blank */}
-                        <div className="text-sm text-white/60">Open History to explore channel stats.</div>
-                    </div>
+            <section className="mt-6 w-full max-w-5xl mx-auto">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
+                    <div className="mb-2 sm:mb-3 font-medium">Recent Signals</div>
+                    {/* Wire real rows later; empty array now satisfies the prop */}
+                    <RecentSignalsTable rows={[]} />
                 </div>
             </section>
             <ChannelPerformance
                 onSummary={(s) => setChanSummary(s)}
-            // pass selected/onSelect if you already use them
             />
         </>
     );
