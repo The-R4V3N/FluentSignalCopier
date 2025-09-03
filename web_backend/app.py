@@ -180,25 +180,36 @@ def _scan_position_files(files_dir: Path) -> List[Path]:
 
 def _pick_best_snapshot(files_dir: Path) -> Optional[Path]:
     """
-    Choose the newest snapshot, but prioritize filenames your EA uses.
+    Choose the newest snapshot in the configured Files dir, preferring our known names,
+    and fall back to a recursive scan if none are valid.
     """
-    # 1) Fast-path: explicit filenames in the configured Files dir
+    # 1) Known filenames in the configured Files dir
     priority = [
-        files_dir / "positions_snapshot.json",  # your EA
-        files_dir / "fluent_positions.json",
-        files_dir / "fluent_position.json",
+        files_dir / "positions_snapshot.json",
+        files_dir / "Fluent_positions.json",
+        files_dir / "Fluent_position.json",
         files_dir / "positions.json",
     ]
+
+    valid: list[Path] = []
     for cand in priority:
         try:
             if cand.exists() and cand.is_file():
                 txt = _read_text_multi(cand)
                 if txt.strip():
-                    return cand
+                    valid.append(cand)
+        except Exception:
+            continue
+
+    if valid:
+        # pick the most recently modified among valid files
+        try:
+            valid.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         except Exception:
             pass
+        return valid[0]
 
-    # 2) Fallback: recursive scan across candidate roots
+    # 2) Fallback: recursive scan across candidate roots (newest first)
     for cand in _scan_position_files(files_dir):
         try:
             txt = _read_text_multi(cand)
