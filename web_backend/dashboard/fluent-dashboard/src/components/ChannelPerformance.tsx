@@ -32,22 +32,42 @@ type RawRec = {
     time?: number | string;       // alt time
 };
 
-const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB"]);
+const INTERNAL_SOURCES = new Set([
+    "", "EA", "GUI", "WEB", "SYSTEM", "BACKEND", "INTERNAL"
+]);
 
 // join key: prefer gid, then oid, then id (OPENs sometimes only have id)
 const keyFor = (r: RawRec) => String(r.gid ?? r.oid ?? r.id ?? "").trim();
 
-function num(x: any): number | null {
+function parseNumeric(x: any): number | null {
+    if (x == null) return null;
+    if (typeof x === "number" && Number.isFinite(x)) return x;
+    if (typeof x === "string") {
+        // remove spaces and currency symbols, normalize comma decimals
+        const s = x.replace(/[^\d,.\-]/g, "").replace(/(\d),(?=\d{3}\b)/g, "$1"); // keep thousands, handle EU style
+        const t = s.includes(",") && !s.includes(".") ? s.replace(",", ".") : s.replace(/,/g, "");
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+    }
     const n = Number(x);
     return Number.isFinite(n) ? n : null;
 }
 
 function pickProfit(rec: RawRec): number | null {
-    return num(rec.profit_usd) ?? null;
+    // Try the likely fields in order
+    return (
+        parseNumeric(rec.profit_usd) ??
+        parseNumeric(rec.profit) ??
+        parseNumeric(rec.pnl) ??
+        parseNumeric(rec.p) ??
+        parseNumeric(rec.net_profit) ??
+        null
+    );
 }
 
 function coalesceTime(rec: RawRec): number | null {
-    return num(rec.t ?? rec.ts ?? rec.time);
+    const n = parseNumeric(rec.t ?? rec.ts ?? rec.time);
+    return n != null ? Math.trunc(n) : null; // expect unix seconds
 }
 
 function fmtWhen(t?: number | null): string | null {
@@ -108,6 +128,7 @@ type Props = {
         bestByWin?: ChanRow | null;
         bestByScore?: ChanRow | null;
         totals: { opens: number; closes: number; channels: number };
+        overallWinRate: number | null;
     }) => void;
 };
 
@@ -131,6 +152,7 @@ export default function ChannelPerformance({
             let data: RawRec[] = [];
             try {
                 const r = await fetch(api("/api/signals?limit=500"));
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
                 const json = await r.json();
                 data = Array.isArray(json) ? (json as RawRec[]) : [];
             } catch {
@@ -212,10 +234,7 @@ export default function ChannelPerformance({
                     }
                 } else if (act === "CLOSE") {
                     acc.closes += 1;
-
-                    // Always count a close in the denominator (prevents staying at "—")
-                    acc.totalClosed += 1;
-
+                    acc.totalClosed += 1; // always count CLOSE in denominator
                     const p = pickProfit(rec);
                     if (p !== null && p > 0) acc.wins += 1;
                 }
@@ -227,15 +246,12 @@ export default function ChannelPerformance({
             // 3) Convert to ChanRow[]
             const out: ChanRow[] = [];
             for (const [channel, a] of byChan) {
-                const win_rate =
-                    a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
-
+                const win_rate = a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
                 const avg_confidence = a.confN > 0 ? a.confSum / a.confN : null;
 
                 // Fallback: if no explicit score fields, use avg confidence as "signal score"
                 const explicitScore = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
-                const signal_score =
-                    explicitScore !== null ? explicitScore : avg_confidence;
+                const signal_score = explicitScore !== null ? explicitScore : avg_confidence;
 
                 out.push({
                     channel,
@@ -248,11 +264,12 @@ export default function ChannelPerformance({
                 });
             }
 
-            // 4) Sort: by win %, then by closes desc
+            // 4) Sort: by win %, then by closes desc, then by name
             out.sort((a, b) => {
                 const aw = a.win_rate ?? -1, bw = b.win_rate ?? -1;
                 if (bw !== aw) return bw - aw;
-                return b.closes - a.closes;
+                if (b.closes !== a.closes) return b.closes - a.closes;
+                return a.channel.localeCompare(b.channel);
             });
 
             setRows(out);
@@ -284,7 +301,18 @@ export default function ChannelPerformance({
             closes: rows.reduce((s, r) => s + (r.closes || 0), 0),
             channels: rows.length,
         };
-        return { bestByWin, bestByScore, totals };
+
+        // Weighted overall win-rate across channels by number of closes
+        let weightedWins = 0, totalCloses = 0;
+        rows.forEach(r => {
+            if (typeof r.win_rate === "number" && r.closes > 0) {
+                weightedWins += (r.win_rate / 100) * r.closes;
+                totalCloses += r.closes;
+            }
+        });
+        const overallWinRate = totalCloses > 0 ? (weightedWins / totalCloses) * 100 : null;
+
+        return { bestByWin, bestByScore, totals, overallWinRate };
     }, [rows]);
 
     useEffect(() => {
