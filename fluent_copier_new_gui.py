@@ -187,12 +187,13 @@ def _sanitize_price(v: Optional[float]) -> Optional[float]:
     return abs(v)  # Prices are never negative
 
 def _find_tps(text: str) -> list[float]:
-    out = []
+    vals = []
     for m in TP_RE.finditer(text):
-        v = _num(m.group(1))           # ← normalization happens here
+        v = _num(m.group(1))
         if v is not None:
-            out.append(_sanitize_price(v))
-    return out
+            vals.append(_sanitize_price(v))
+    # unique + ascending order
+    return sorted(set(vals))
 
 # =====================================================================
 # Signal Parsing
@@ -228,15 +229,14 @@ NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:
 SIDE_RE = re.compile(r'\b(BUY|SELL)\b', re.I)
 ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(' + NUM_TOKEN + r')\b', re.I)
 
-# Accepts: SL / S/L / STOPLOSS / STOP LOSS / STOPPLOSS, with optional @ or :
-# Handles spaces/thousand separators/decimal commas/dots
+# Accepts: SL / S/L / STOPLOSS / STOP LOSS / STOPPLOSS with @, :, =, -, en/em dash
 SL_RES = re.compile(
-    r'(?im)^\s*(?:SL|S/L|STOPP?[\s\-]*LOSS)\s*(?:@|:)?\s*([0-9][0-9\s.,]*)\b'
+    r'(?im)\b(?:SL|S/L|STOPP?[\s\-]*LOSS)\b\s*(?:@|:|=|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
-# Accepts: TP, TP1, TP2 ... with optional @ : = -> and loose spacing/commas
+# Accepts: TP, TP1, TP2 … with @, :, =, ->, -, en/em dash; works anywhere in the line
 TP_RE = re.compile(
-    r'(?im)^\s*TP\d*\s*(?:@|:|=|->)?\s*([0-9][0-9\s.,]*)\b'
+    r'(?im)\bTP\d*\b\s*(?:@|:|=|->|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
 # Order type patterns
@@ -264,7 +264,8 @@ CLOSE_ANY_RE = re.compile(
 # TP move patterns
 TP_MOVE_PATTERNS = [
     re.compile(r'\b(?:move|set|raise|adjust|shift)\s*tp\s*(\d{1,2})\s*(?:to|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-    re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|=|->)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+    # OLD (too broad): r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?|->)\s*(-?\d+(?:[.,]\d+)?)\b'
+    re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
 def _try_sl(text: str) -> Optional[float]:
@@ -275,13 +276,11 @@ def _try_sl(text: str) -> Optional[float]:
     return _sanitize_price(v)
 
 def _try_tp(line: str) -> Optional[float]:
-    for r in TP_RE:
-        m = r.search(line)
-        if m:
-            v = _num(m.group(1))
-            if v is not None:
-                return _sanitize_price(v)
-    return None
+    m = TP_RE.search(line)
+    if not m:
+        return None
+    v = _num(m.group(1))
+    return _sanitize_price(v) if v is not None else None
 
 def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
     """Return list of {'slot': int, 'to': float} for any TP move variants found."""
@@ -413,17 +412,18 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         entry = None
 
     return {
-        "kind": "OPEN",
-        "side": side,
-        "symbol": symbol,
-        "order_type": order_type,
-        "entry": entry,
-        "entry_ref": entry_ref,
-        "sl": sl,
-        "tps": tps,
-        "be_on_tp": be_on_tp,
-        "risk": risk,
-    }
+    "kind": "OPEN",
+    "side": side,
+    "symbol": symbol,
+    "order_type": order_type,
+    "entry": entry,
+    "entry_ref": entry_ref,
+    "sl": sl,
+    "tps": tps,
+    "tp": (tps[0] if tps else None),   # ← add this line
+    "be_on_tp": be_on_tp,
+    "risk": risk,
+}
 
 # =====================================================================
 # MT5 Path Detection
