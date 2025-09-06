@@ -29,6 +29,9 @@ export default function HistoryPage() {
     // lightweight toast
     const [toast, setToast] = useState<string | null>(null);
 
+    // clearing state for the button UX
+    const [clearing, setClearing] = useState(false);
+
     useEffect(() => {
         document.title = "Fluent Signal Copier — History";
     }, []);
@@ -41,19 +44,19 @@ export default function HistoryPage() {
     }, []);
 
     async function onClearHistory() {
+        if (clearing) return;
+        setClearing(true);
         try {
-            const r = await fetch("/api/history/clear", { method: "POST" });
+            // use the consolidated endpoint and always save a backup
+            const r = await fetch("/api/signals/clear?backup=true", { method: "POST" });
             const j = await r.json();
-            if (r.ok && j.ok) {
-                setRows([]);
-                setToast("History cleared");
-            } else {
-                setToast(j?.error ? `Failed: ${j.error}` : "Failed to clear history");
-            }
+            if (!r.ok || !j.ok) throw new Error(j?.error || "Failed to clear history");
+            setRows([]);
+            setToast("History cleared (backup saved).");
         } catch (e: any) {
             setToast(e?.message || "Failed to clear history");
         } finally {
-            // auto-hide toast
+            setClearing(false);
             setTimeout(() => setToast(null), 3000);
         }
     }
@@ -108,11 +111,13 @@ export default function HistoryPage() {
 
                     {/* Clear history */}
                     <button
-                        className="px-3 py-1.5 rounded-lg border token-border bg-[var(--surface-2)]"
+                        className="px-3 py-1.5 rounded-lg border token-border bg-[var(--surface-2)] disabled:opacity-60"
                         onClick={onClearHistory}
                         title="Clear the stored signals history"
+                        disabled={clearing}
+                        aria-busy={clearing}
                     >
-                        Clear history
+                        {clearing ? "Clearing…" : "Clear history"}
                     </button>
                 </div>
 
