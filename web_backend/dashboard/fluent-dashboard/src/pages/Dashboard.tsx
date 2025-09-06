@@ -159,9 +159,7 @@ export default function Dashboard() {
                 <StatCard
                     title="Active Channels"
                     value={
-                        chanSummary?.totals?.channels != null
-                            ? String(chanSummary.totals.channels)
-                            : "—"
+                        chanSummary?.totals?.channels != null ? String(chanSummary.totals.channels) : "—"
                     }
                 />
                 <StatCard
@@ -177,28 +175,49 @@ export default function Dashboard() {
             </section>
 
             {/* Optional error banner */}
-            {error && <div className="mt-3 text-sm text-rose-400">{error}</div>}
+            {error && (
+                <div className="mt-3 text-sm" style={{ color: "var(--signal-sell)" }}>
+                    {error}
+                </div>
+            )}
 
             {/* Controls */}
             <div className="md:mt-4 h-16" aria-hidden />
             <ControlsBar
                 paused={paused}
-                onStart={async () => { try { await api.start(); setPaused(false); } catch { } }}
-                onStop={async () => { try { await api.stop(); setPaused(true); } catch { } }}
+                onStart={async () => {
+                    try {
+                        await api.start();
+                        setPaused(false);
+                    } catch { }
+                }}
+                onStop={async () => {
+                    try {
+                        await api.stop();
+                        setPaused(true);
+                    } catch { }
+                }}
                 onTogglePause={async () => {
                     const next = !paused;
-                    try { await api.pause(next); setPaused(next); } catch { }
+                    try {
+                        await api.pause(next);
+                        setPaused(next);
+                    } catch { }
                 }}
                 qualityDefault={quality}
-                onQualityChange={async (val: number) => { try { await api.setQuality(val); } catch { } }}
+                onQualityChange={async (val: number) => {
+                    try {
+                        await api.setQuality(val);
+                    } catch { }
+                }}
             />
 
             {/* Recent Signals – last 3 + link to full history */}
             <section className="mt-6 w-full max-w-5xl mx-auto">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
+                <div className="card p-3 sm:p-4">
                     <div className="mb-2 sm:mb-3 flex items-center justify-between">
                         <div className="font-medium">
-                            Recent Signals <span className="opacity-70">(last 3)</span>
+                            Recent Signals <span className="muted">(last 3)</span>
                         </div>
                         <Link
                             to="/history"

@@ -1,3 +1,4 @@
+// src/App.tsx
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { useState } from "react";
 import Sidebar from "./components/Sidebar";
@@ -23,12 +24,20 @@ function Shell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="min-h-dvh bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-950 text-zinc-100">
+    // Page canvas uses tokens: --bg / --text
+    <div className="min-h-dvh app-bg">
       {/* Top bar (mobile) */}
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-zinc-950/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur">
+      <header
+        className="
+          sticky top-0 z-30 border-b token-border backdrop-blur
+        "
+        // translucent header using surface token, works in light & dark
+        style={{ background: "color-mix(in srgb, var(--surface) 92%, transparent)" }}
+      >
         <div className="mx-auto max-w-7xl px-3 sm:px-4 lg:px-6 h-14 flex items-center justify-between">
           <button
-            className="md:hidden rounded-lg px-3 py-2 bg-white/10 text-white"
+            className="md:hidden rounded-lg px-3 py-2"
+            style={{ background: "var(--surface-2)" }}
             onClick={() => setDrawerOpen(true)}
             aria-label="Open menu"
           >
