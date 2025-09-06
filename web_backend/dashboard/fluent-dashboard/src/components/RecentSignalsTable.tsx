@@ -31,31 +31,52 @@ function bgTintStyle(color: string, opacityPercent = 18): React.CSSProperties {
 
 const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
     return (
-        <div className="rounded-xl border border-white/10 overflow-hidden">
+        <div className="card overflow-hidden">
             <table className="w-full text-sm leading-6">
-                <thead className="sticky top-0 bg-black/40 backdrop-blur supports-[backdrop-filter]:bg-black/30">
-                    <tr className="text-left text-white/70">
-                        {["Time", "Action", "Symbol", "Side", "Entry/Type", "Details", "Channel"].map(h => (
-                            <th key={h} className="px-3 py-2">{h}</th>
-                        ))}
+                <thead className="sticky top-0 table-header">
+                    <tr className="text-left muted">
+                        {["Time", "Action", "Symbol", "Side", "Entry/Type", "Details", "Channel"].map(
+                            (h) => (
+                                <th key={h} className="px-3 py-2">
+                                    {h}
+                                </th>
+                            )
+                        )}
                     </tr>
                 </thead>
-                <tbody className="[&>tr:nth-child(odd)]:bg-white/[0.02]">
+
+                {/* stripe odd rows using theme token, no hard-coded whites */}
+                <tbody className="[&>tr:nth-child(odd)]:[background:var(--surface-2)]">
                     {rows.map((r, i) => {
                         const time = r.t ? new Date(r.t * 1000).toLocaleTimeString() : "—";
                         const details = [
                             r.sl !== undefined ? `SL ${r.sl}` : "",
-                            (r.tps?.length ? r.tps.map((v, idx) => `TP${idx + 1} ${v}`).join(", ") : "")
-                        ].filter(Boolean).join(" | ");
-                        const entry = r.order_type === "MARKET"
-                            ? (r.entry_ref ? `MARKET (${r.entry_ref})` : "MARKET")
-                            : r.order_type ? `${r.order_type} @ ${r.entry ?? ""}` : (r.entry ?? "");
+                            r.tps?.length ? r.tps.map((v, idx) => `TP${idx + 1} ${v}`).join(", ") : "",
+                        ]
+                            .filter(Boolean)
+                            .join(" | ");
+
+                        const entry =
+                            r.order_type === "MARKET"
+                                ? r.entry_ref
+                                    ? `MARKET (${r.entry_ref})`
+                                    : "MARKET"
+                                : r.order_type
+                                    ? `${r.order_type} @ ${r.entry ?? ""}`
+                                    : (r.entry as any) ?? "";
+
                         const baseColor = actionColorVar(r.action, r.side);
 
                         return (
-                            <tr key={i} className="border-t border-white/5 transition-colors" style={bgTintStyle(baseColor, 18)}>
+                            <tr
+                                key={i}
+                                className="border-t token-border transition-colors hover:[background:color-mix(in_srgb,var(--surface-2)_60%,transparent)]"
+                                style={bgTintStyle(baseColor, 18)}
+                            >
                                 <td className="px-3 py-2">{time}</td>
-                                <td className="px-3 py-2 font-semibold" style={{ color: baseColor }}>{r.action}</td>
+                                <td className="px-3 py-2 font-semibold" style={{ color: baseColor }}>
+                                    {r.action}
+                                </td>
                                 <td className="px-3 py-2">{r.symbol}</td>
                                 <td className="px-3 py-2">{r.side || ""}</td>
                                 <td className="px-3 py-2 tabular-nums">{entry}</td>
