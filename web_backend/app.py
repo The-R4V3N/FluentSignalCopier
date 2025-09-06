@@ -9,6 +9,34 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Iterable, Dict, Any
 import asyncio, json, time, os, sys, re
+import shutil
+
+# --- Version helpers ----------------------------------------------------------
+import subprocess
+
+def _compute_version() -> dict:
+    def _run(cmd: list[str]) -> str | None:
+        try:
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
+            return out or None
+        except Exception:
+            return None
+
+    tag = _run(["git", "describe", "--tags", "--abbrev=0"])
+    commit = _run(["git", "rev-parse", "--short", "HEAD"])
+    dirty = bool(_run(["git", "status", "--porcelain"]))
+
+    return {
+        "app": "Fluent Web Backend",
+        "version": tag or "0.0.0",
+        "git_commit": commit or "unknown",
+        "dirty": dirty,
+        "py": sys.version.split()[0],
+        "built_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+VERSION = _compute_version()
+
 
 # --- Optional .env loading ----------------------------------------------------
 try:
@@ -22,13 +50,27 @@ except Exception:
 # -----------------------------------------------------------------------------
 app = FastAPI(title="Fluent Web Backend")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# If you need cookies/credentials, list explicit origins via env.
+# Example: CORS_ORIGINS="http://localhost:5173,http://127.0.0.1:5173"
+_origins_env = os.getenv("CORS_ORIGINS")
+if _origins_env:
+    origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # Safe local defaults without credentials
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # -----------------------------------------------------------------------------
 # Server-side settings persisted for the web UI (Telegram creds, MT5 dir, etc.)
@@ -238,12 +280,10 @@ def _set_mt5_dir(new_dir: str) -> bool:
 _ENCODINGS = ("utf-8", "utf-8-sig", "utf-16", "utf-16-le", "utf-16-be", "cp1252")
 
 def _read_text_multi(path: Path) -> str:
-    last_err = None
     for enc in _ENCODINGS:
         try:
             return path.read_text(encoding=enc, errors="strict")
-        except Exception as e:
-            last_err = e
+        except Exception:
             continue
     # be permissive fallback (ignore undecodable bytes)
     try:
@@ -366,7 +406,7 @@ def _heartbeat_status():
         return "dead"
     except Exception:
         return "dead"
-    
+
 def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
     if not path.exists():
         return []
@@ -375,7 +415,6 @@ def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
     try:
         with path.open("rb") as f:
             f.seek(0, 2)
-            size = f.tell()
             block = 4096
             data = b""
             while len(rows) < limit and f.tell() > 0:
@@ -386,7 +425,6 @@ def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
                 data = chunk + data
                 if seek == 0:
                     break
-                f.seek(seek)
             # split lines and parse JSON
             for line in data.splitlines()[::-1]:  # newest last in file -> iterate from end
                 line = line.strip()
@@ -403,9 +441,9 @@ def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
         return []
     return rows
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # JSON parsing helpers for positions files
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 def _parse_positions_json(text: str) -> List[dict]:
     """
     Accept either:
@@ -428,9 +466,9 @@ def _parse_positions_json(text: str) -> List[dict]:
         pass
     return []
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Positions & PnL helpers (use selector each time)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 def _load_open_positions_count() -> int:
     """Count entries in the most recent valid snapshot (authoritative MT5 state)."""
     try:
@@ -452,8 +490,7 @@ def _pnl_30d_usd() -> float:
         total = 0.0
         with SIGNALS.open("rb") as f:
             f.seek(0, os.SEEK_END)
-            sz = f.tell()
-            f.seek(max(0, sz - 2*1024*1024))  # last 2MB
+            f.seek(max(0, f.tell() - 2*1024*1024))  # last 2MB
             data = f.read().decode("utf-8", "ignore").splitlines()
         for ln in data:
             try:
@@ -491,7 +528,6 @@ def _profit_usd_or_any(rec):
             continue
     return None
 
-
 def _win_rate_30d() -> float | None:
     """
     Win% over the last 30 days from CLOSE lines that have a numeric profit.
@@ -505,8 +541,7 @@ def _win_rate_30d() -> float | None:
         total = 0
         with SIGNALS.open("rb") as f:
             f.seek(0, os.SEEK_END)
-            sz = f.tell()
-            f.seek(max(0, sz - 2 * 1024 * 1024))  # last 2MB
+            f.seek(max(0, f.tell() - 2 * 1024 * 1024))  # last 2MB
             data = f.read().decode("utf-8", "ignore").splitlines()
 
         for ln in data:
@@ -545,7 +580,16 @@ STATE = {"running": False, "paused": False, "quality": 60}
 # -----------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": "1.0", "py": sys.version.split()[0]}
+    payload = {
+        "ok": True,
+        "heartbeat": _heartbeat_status(),
+        **{k: v for k, v in VERSION.items() if k != "dirty"}  # omit 'dirty' here if you want
+    }
+    return payload
+
+@app.get("/api/version")
+def api_version():
+    return VERSION
 
 @app.get("/api/paths")
 def paths():
@@ -571,8 +615,7 @@ def metrics():
         if SIGNALS.exists():
             with SIGNALS.open("rb") as f:
                 f.seek(0, os.SEEK_END)
-                sz = f.tell()
-                f.seek(max(0, sz - 512 * 1024))  # last 512KB
+                f.seek(max(0, f.tell() - 512 * 1024))  # last 512KB
                 data = f.read().decode("utf-8", "ignore").splitlines()[-1000:]
             for ln in data:
                 try:
@@ -589,7 +632,7 @@ def metrics():
 
     open_positions = _load_open_positions_count()
     pnl30 = _pnl_30d_usd()
-    win30 = _win_rate_30d()   # <-- NEW
+    win30 = _win_rate_30d()
 
     counts = {
         "open": opens, "close": closes, "modify": mods, "modify_tp": modtp, "emergency": emerg,
@@ -612,9 +655,9 @@ def metrics():
 def signals(limit: int = 200):
     return JSONResponse(_tail_jsonl(str(SIGNALS), limit))
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # API: current open positions (from EA snapshot)
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 @app.get("/api/positions")
 def api_positions():
     try:
@@ -640,33 +683,82 @@ def emergency_close_all():
     return {"ok": True, "gid": gid}
 
 # -----------------------------------------------------------------------------
+# API: clear signal history (single source of truth)
+# -----------------------------------------------------------------------------
+@app.post("/api/signals/clear")
+def api_signals_clear(backup: bool = True):
+    """
+    Clear the signals history on disk.
+    Optional ?backup=false to skip creating a .bak copy before truncation.
+    """
+    try:
+        made_backup = False
+        if SIGNALS.exists():
+            if backup:
+                ts = int(time.time())
+                bak = SIGNALS.with_name(f"{SIGNALS.stem}.{ts}.bak{SIGNALS.suffix}")
+                shutil.copy2(SIGNALS, bak)
+                made_backup = True
+            # Truncate file
+            SIGNALS.write_text("", encoding="utf-8")
+        return {"ok": True, "cleared": True, "backup": made_backup}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+# Back-compat / friendly alias; delegates to the same logic
+@app.post("/api/history/clear")
+def clear_history(backup: bool = True):
+    return api_signals_clear(backup=backup)
+
+# -----------------------------------------------------------------------------
 # Websocket: stream new JSONL lines (auto-handles rotation & path changes)
 # -----------------------------------------------------------------------------
 @app.websocket("/ws")
 async def ws_events(ws: WebSocket):
     await ws.accept()
-    last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
-    last_path = str(SIGNALS)
     try:
+        last_path = str(SIGNALS)
+        try:
+            last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
+        except FileNotFoundError:
+            last_size = 0
+
         while True:
             await asyncio.sleep(0.8)
 
             # if path changed at runtime (mt5_dir switched), reset
             if str(SIGNALS) != last_path:
                 last_path = str(SIGNALS)
-                last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
+                try:
+                    last_size = SIGNALS.stat().st_size if SIGNALS.exists() else 0
+                except FileNotFoundError:
+                    last_size = 0
+                continue
 
             if not SIGNALS.exists():
                 last_size = 0
                 continue
 
-            size = SIGNALS.stat().st_size
+            # Safe stat (file may rotate)
+            try:
+                size = SIGNALS.stat().st_size
+            except FileNotFoundError:
+                last_size = 0
+                continue
+
             if size < last_size:
-                last_size = 0  # rotation/truncate
+                # rotation/truncate
+                last_size = 0
+
             if size > last_size:
-                with SIGNALS.open("rb") as f:
-                    f.seek(last_size)
-                    chunk = f.read(size - last_size).decode("utf-8", "ignore")
+                try:
+                    with SIGNALS.open("rb") as f:
+                        f.seek(last_size)
+                        chunk = f.read(size - last_size).decode("utf-8", "ignore")
+                except FileNotFoundError:
+                    last_size = 0
+                    continue
+
                 last_size = size
                 for ln in chunk.splitlines():
                     ln = ln.strip()
@@ -723,7 +815,7 @@ def channel_performance(limit: int = 5000):
     Minimal robust aggregation:
     - JOIN CLOSE->OPEN via gid/oid/id to pick channel from OPEN
     - Filter internal sources
-    - Win% from profit>0
+    - Win% from profit>0 (any profit field)
     """
     rows = _tail_jsonl(str(SIGNALS), max(100, min(limit, 20000)))
 
@@ -781,7 +873,7 @@ def channel_performance(limit: int = 5000):
         elif a == "CLOSE":
             slot["closes"] += 1
             slot["totalClosed"] += 1
-            p = _profit(r)
+            p = _profit_usd_or_any(r)
             if p is not None and p > 0:
                 slot["wins"] += 1
 
@@ -980,6 +1072,11 @@ if DIST.exists():
     @app.get("/app")
     def serve_app_index():
         """Single-page app entry (kept at /app so / stays API JSON)."""
+        return FileResponse(DIST / "index.html")
+    
+    # Serve index.html for any other path so SPA routes work (e.g., /dashboard)
+    @app.get("/{full_path:path}")
+    def spa_catch_all(full_path: str):
         return FileResponse(DIST / "index.html")
 
 # -----------------------------------------------------------------------------

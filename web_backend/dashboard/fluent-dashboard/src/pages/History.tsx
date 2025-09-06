@@ -26,6 +26,12 @@ export default function HistoryPage() {
     const [bestScoreName, setBestScoreName] = useState<string>("—");
     const [totals, setTotals] = useState({ opens: 0, closes: 0, channels: 0 });
 
+    // lightweight toast
+    const [toast, setToast] = useState<string | null>(null);
+
+    // clearing state for the button UX
+    const [clearing, setClearing] = useState(false);
+
     useEffect(() => {
         document.title = "Fluent Signal Copier — History";
     }, []);
@@ -36,6 +42,24 @@ export default function HistoryPage() {
             setRows(Array.isArray(data) ? data : []);
         })();
     }, []);
+
+    async function onClearHistory() {
+        if (clearing) return;
+        setClearing(true);
+        try {
+            // use the consolidated endpoint and always save a backup
+            const r = await fetch("/api/signals/clear?backup=true", { method: "POST" });
+            const j = await r.json();
+            if (!r.ok || !j.ok) throw new Error(j?.error || "Failed to clear history");
+            setRows([]);
+            setToast("History cleared (backup saved).");
+        } catch (e: any) {
+            setToast(e?.message || "Failed to clear history");
+        } finally {
+            setClearing(false);
+            setTimeout(() => setToast(null), 3000);
+        }
+    }
 
     const onMsg = useCallback((rec: Rec) => {
         if (paused) return;
@@ -84,14 +108,39 @@ export default function HistoryPage() {
                             Clear filter: <span className="ml-1 font-semibold">{selectedChannel}</span>
                         </button>
                     )}
+
+                    {/* Clear history */}
+                    <button
+                        className="px-3 py-1.5 rounded-lg border token-border bg-[var(--surface-2)] disabled:opacity-60"
+                        onClick={onClearHistory}
+                        title="Clear the stored signals history"
+                        disabled={clearing}
+                        aria-busy={clearing}
+                    >
+                        {clearing ? "Clearing…" : "Clear history"}
+                    </button>
                 </div>
+
+                {/* Pause / Resume */}
                 <button
-                    className="px-3 py-2 rounded-lg border token-border"
+                    className="px-3 py-1.5 rounded-lg border token-border"
                     onClick={() => setPaused(p => !p)}
                 >
                     {paused ? "Resume feed" : "Pause feed"}
                 </button>
             </div>
+
+            {/* Toast */}
+            {toast && (
+                <div
+                    className="fixed bottom-4 right-4 rounded-lg border token-border px-4 py-2 shadow-lg"
+                    style={{ background: "var(--surface)", color: "var(--text)" }}
+                    role="status"
+                    aria-live="polite"
+                >
+                    {toast}
+                </div>
+            )}
 
             {/* KPI cards */}
             <div className="grid gap-4 md:grid-cols-4">
