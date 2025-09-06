@@ -31,13 +31,13 @@ function bgTintStyle(color: string, opacityPercent = 18): React.CSSProperties {
 
 const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
     return (
-        <div className="card overflow-hidden">
-            <table className="w-full text-sm leading-6">
+        <div className="card overflow-x-auto">
+            <table className="w-full min-w-[700px] text-sm leading-6">
                 <thead className="sticky top-0 table-header">
                     <tr className="text-left muted">
                         {["Time", "Action", "Symbol", "Side", "Entry/Type", "Details", "Channel"].map(
                             (h) => (
-                                <th key={h} className="px-3 py-2">
+                                <th key={h} className="px-3 py-2 whitespace-nowrap">
                                     {h}
                                 </th>
                             )
