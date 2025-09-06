@@ -26,6 +26,9 @@ export default function HistoryPage() {
     const [bestScoreName, setBestScoreName] = useState<string>("—");
     const [totals, setTotals] = useState({ opens: 0, closes: 0, channels: 0 });
 
+    // lightweight toast
+    const [toast, setToast] = useState<string | null>(null);
+
     useEffect(() => {
         document.title = "Fluent Signal Copier — History";
     }, []);
@@ -36,6 +39,24 @@ export default function HistoryPage() {
             setRows(Array.isArray(data) ? data : []);
         })();
     }, []);
+
+    async function onClearHistory() {
+        try {
+            const r = await fetch("/api/history/clear", { method: "POST" });
+            const j = await r.json();
+            if (r.ok && j.ok) {
+                setRows([]);
+                setToast("History cleared");
+            } else {
+                setToast(j?.error ? `Failed: ${j.error}` : "Failed to clear history");
+            }
+        } catch (e: any) {
+            setToast(e?.message || "Failed to clear history");
+        } finally {
+            // auto-hide toast
+            setTimeout(() => setToast(null), 3000);
+        }
+    }
 
     const onMsg = useCallback((rec: Rec) => {
         if (paused) return;
@@ -84,14 +105,37 @@ export default function HistoryPage() {
                             Clear filter: <span className="ml-1 font-semibold">{selectedChannel}</span>
                         </button>
                     )}
+
+                    {/* Clear history */}
+                    <button
+                        className="px-3 py-1.5 rounded-lg border token-border bg-[var(--surface-2)]"
+                        onClick={onClearHistory}
+                        title="Clear the stored signals history"
+                    >
+                        Clear history
+                    </button>
                 </div>
+
+                {/* Pause / Resume */}
                 <button
-                    className="px-3 py-2 rounded-lg border token-border"
+                    className="px-3 py-1.5 rounded-lg border token-border"
                     onClick={() => setPaused(p => !p)}
                 >
                     {paused ? "Resume feed" : "Pause feed"}
                 </button>
             </div>
+
+            {/* Toast */}
+            {toast && (
+                <div
+                    className="fixed bottom-4 right-4 rounded-lg border token-border px-4 py-2 shadow-lg"
+                    style={{ background: "var(--surface)", color: "var(--text)" }}
+                    role="status"
+                    aria-live="polite"
+                >
+                    {toast}
+                </div>
+            )}
 
             {/* KPI cards */}
             <div className="grid gap-4 md:grid-cols-4">
