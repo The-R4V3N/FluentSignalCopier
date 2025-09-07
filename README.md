@@ -12,11 +12,17 @@
 ## 📖 Table of Contents
 
 📈 [Track Record](#-proven-track-record)
+
 🎯 [Choose Your Path](#-choose-your-path)  
+
 🚀 [Quick Start](#-quick-start)
+
 🖥️ [Interfaces](#%EF%B8%8F-interfaces)
+
 📊 [Latest Features](#-latest-features)
+
 🛠️ [Troubleshooting](#%EF%B8%8F-troubleshooting)
+
 ❓ [FAQ](#-frequently-asked-questions)
 
 ---
