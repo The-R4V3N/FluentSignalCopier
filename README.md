@@ -308,7 +308,7 @@ graph TD
 
 ## 📄 Disclaimer
 
-It does **not** constitute financial advice. Trading involves risk.  
+The Software does **not** constitute financial advice. Trading involves risk.  
 Always test on demo accounts first and never risk more than you can afford to lose.
 
 ---
