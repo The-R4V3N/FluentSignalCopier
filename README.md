@@ -50,7 +50,9 @@ TP: 2000
 ## 🎯 Choose Your Path
 
 **👶 New to automated trading?** → [Quick Start Guide](#-quick-start)
+
 **🔧 Need custom configuration?** → [Features](#-features)  
+
 **💼 Enterprise deployment?** → [Architecture](#%EF%B8%8F-architecture)
 
 ---
