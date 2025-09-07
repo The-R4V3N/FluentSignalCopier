@@ -142,7 +142,7 @@ TP: 2000
 
 ### 🌐 Web Dashboard
 
-![Web Dashboard](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_web_dashboard.png)
+![Web Dashboard](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/Web_dashboard.png)
 
 **Professional web interface featuring:**
 
