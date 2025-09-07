@@ -1,6 +1,54 @@
 <!-- markdownlint-disable MD024 -->
 # Changelog
 
+Changelog — 0.13.0
+
+## Added
+
+- **History Page**
+  - New `Clear history` button wired to `/api/signals/clear?backup=true`, with automatic `.bak` safety copy before truncation.
+  - Toast notifications for clear success/error.
+  - Channel filter + pause/resume feed toggle.
+- **Channel Performance**
+  - Canonical source attribution: CLOSE signals are mapped back to their original OPEN’s channel when missing/blank.
+  - Weighted overall win-rate across all channels (used in Dashboard KPI).
+  - Best-by-Win% and Best-by-Score highlights in both table and cards.
+- **Settings**
+  - Server-backed sources list, Telegram API credentials, MT5 dir persisted in `web_settings.json`.
+  - Auto-detect MT5 Files directory button.
+  - Theme & signal-color pickers (BUY/SELL/MODIFY).
+- **ControlsBar**
+  - Mobile sticky action bar with Start/Pause/Stop + quality slider.
+  - Desktop variant with enlarged quality range input.
+- **Dashboard**
+  - Recent signals card now hydrates from `/api/history` on load, then updates live via WebSocket.
+  - Deduplication of signals across WS + REST.
+  - Added “View full history” link.
+
+### Changed
+
+- **Backend**
+  - `/api/health` and `/api/version` now include live git tag + commit hash via `_compute_version()`, without restart.
+  - `/api/signals/clear` and `/api/history/clear` unified into a single safe implementation with backup.
+  - `/api/channel-performance` and `/api/channels` improved to exclude internal/system sources consistently.
+  - Snapshot file resolution more robust: prefers `positions_snapshot.json`, falls back to scan all sibling/common terminals.
+- **Frontend**
+  - Sidebar now token-based, no hardcoded dark styles.
+  - Version + heartbeat pill in top bar uses live `/api/health` every 5s.
+
+### Fixed
+
+- Parser (bridge):
+  - Safer SL/TP regex: captures full decimals, avoids placeholders (`TP1 / TP2` with no number).
+  - SL hyphen sanitization (`SL-95.34` no longer parsed as negative).
+  - “Close to entry” no longer mis-classified as CLOSE action.
+  - Inline headers (`#XAUUSD BUY LIMIT @ 3402`) now parsed correctly as pending orders.
+- Websocket backend:
+  - Auto-recovers from file rotation/truncation (`Fluent_signals.jsonl`).
+  - Correctly streams only new lines since last offset.
+
+---
+
 Changelog — 0.12.0
 Added
 
