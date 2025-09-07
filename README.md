@@ -308,7 +308,6 @@ graph TD
 
 ## 📄 Disclaimer
 
-This software is provided for **educational and informational purposes only**.  
 It does **not** constitute financial advice. Trading involves risk.  
 Always test on demo accounts first and never risk more than you can afford to lose.
 
