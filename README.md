@@ -49,8 +49,7 @@ TP: 2000
 
 ## 🎯 Choose Your Path
 
-**👶 New to automated trading?** → [Quick Start Guide](#-quick-start)  
-**⚡ Want it running in 5 minutes?** → [Setup](#️-setup)  
+**👶 New to automated trading?** → [Quick Start Guide](#-quick-start)
 **🔧 Need custom configuration?** → [Features](#-features)  
 **💼 Enterprise deployment?** → [Architecture](#%EF%B8%8F-architecture)
 
@@ -297,45 +296,6 @@ graph TD
 | **Channels** | ✅ Up to 5 | ✅ Unlimited | ✅ Unlimited + performance ranking |
 
 ---
-
-## ⚙️ Setup
-
----
-
-1. **Clone the repository**:
-
-   ```bash
-   git clone https://github.com/The-R4V3N/FluentSignalCopier.git
-   cd FluentSignalCopier
-   ```
-
-2. **Install dependencies**:
-
-   ```bash
-   poetry install
-   ```
-
-3. **Configure your environment**:
-
-   - Copy `.env.example` to `.env` and update the values as needed.
-
-4. **Run the application**:
-
-- To run the windows user interface
-- Make sure you have the necessary dependencies installed
-- Run the following command in your terminal:
-
-   ```bash
-   poetry run python fluent_copier_new_gui.py
-   ```
-
-- To run the application in a terminal
-- Make sure you have the necessary dependencies installed
-- Run the following command in your terminal:
-
-   ```bash
-   poetry run python telegram_bridge.py
-   ```
 
 ## 🔐 Security
 
