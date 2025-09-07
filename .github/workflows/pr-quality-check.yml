@@ -7,12 +7,18 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   nudge-docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # ensure we have history to diff against base
+          fetch-depth: 0
+          # optional: make it explicit we’re on the PR head SHA
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Detect docs/changelog changes
         id: changed
@@ -25,9 +31,9 @@ jobs:
         id: diff
         run: |
           set -e
-          git fetch origin ${{ github.base_ref }} --depth=1
-          # List changed files
-          CHANGED="$(git diff --name-only origin/${{ github.base_ref }}...HEAD)"
+          git fetch --no-tags --prune origin ${{ github.base_ref }}
+          # NOTE: use two-dot, not three-dot (no merge-base required)
+          CHANGED="$(git diff --name-only origin/${{ github.base_ref }}..HEAD)"
           echo "$CHANGED"
           NEED_DOCS=false
           if echo "$CHANGED" | grep -Eiq '(fluent_copier\.py|telegram_bridge\.py|mt5/.*\.(mq5|mqh)|setup_logging\.py|logging_config\.py|alert_system\.py)'; then
