@@ -2,7 +2,7 @@
 
 ## Production-ready Telegram → MetaTrader 5 signal bridge
 
-![Version](https://img.shields.io/badge/version-v0.12.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
+![Version](https://img.shields.io/badge/version-v0.13.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
 
 **Turn any Telegram trading channel into automated MT5 trades**  
 ✅ Parse messy human signals  ✅ Smart risk management  ✅ Multi-platform monitoring
