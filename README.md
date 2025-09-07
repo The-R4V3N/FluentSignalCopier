@@ -43,7 +43,7 @@ TP: 2000
 **Output:** Automatic MT5 order with risk management  
 **Result:** Hands-free trading from any Telegram signal provider  
 
-## Low-latency execution (tested under 200ms in local setups)
+Low-latency execution (tested under 200ms in local setups)
 
 ---
 
