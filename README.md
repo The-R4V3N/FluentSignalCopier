@@ -265,7 +265,7 @@ HALF RISK
 ```mermaid
 graph TD
     TG[Telegram Channels] --> |Telethon| BRIDGE[Python Bridge Parser]
-    BRIDGE --> |JSONL files| MT5[MT5 EA (MQL5)]
+    BRIDGE --> |JSONL files| MT5["MT5 EA MQL5"]
     MT5 --> |Trades| BROKER[Broker]
     BRIDGE --> |Logs/Heartbeat| GUI[PySide6 GUI]
     BRIDGE --> |Signals/Logs| API[FastAPI Backend]
@@ -336,34 +336,6 @@ graph TD
    ```bash
    poetry run python telegram_bridge.py
    ```
-
-## 🗺️ Roadmap
-
-### Q1 2026
-
-- 🤖 **ML Confidence Scoring**: Planned upgrade from heuristics to machine learning
-- 📊 **Enhanced Analytics**: Deeper performance insights and trend analysis
-- 🔗 **Webhook Integration**: Support for Discord, Slack, and custom webhooks
-
-### Q2 2026  
-
-- 📱 **Native Mobile App**  
-- 🌐 **Multi-Language Support** (Spanish, French, German, Chinese)  
-- ⚡ **Performance Optimizations** (target <100ms execution)
-
-### Q3 2026
-
-- 🏦 **Multi-Broker Support** (cTrader, TradingView, Interactive Brokers)  
-- 🤝 **Social Trading**: Share and subscribe to provider ratings  
-- 📈 **Portfolio Management**: Cross-account control
-
-### Q4 2026
-
-- 🧠 **ML Trade Optimization**: Smarter entry/exit timing  
-- 🔐 **Enterprise Features**: Team management, RBAC  
-- 📊 **Advanced Reporting**: Custom report builder  
-
----
 
 ## 🔐 Security
 
