@@ -10,11 +10,33 @@ from datetime import datetime
 from typing import Optional, List, Iterable, Dict, Any
 import asyncio, json, time, os, sys, re
 import shutil
-
-# --- Version helpers ----------------------------------------------------------
 import subprocess
 
+# --- Version helpers ----------------------------------------------------------
+
 def _compute_version() -> dict:
+    """
+    Compute version info dynamically on each call.
+
+    Safety net:
+    - If APP_VERSION is set, use that (and APP_COMMIT if provided), skipping git.
+    - Otherwise, read from the local git repo (tags + short commit).
+    """
+    # ---- env override (CI / packaged builds) ----
+    env_ver = os.getenv("APP_VERSION")
+    env_commit = os.getenv("APP_COMMIT")
+
+    if env_ver:
+        return {
+            "app": "Fluent Web Backend",
+            "version": env_ver,
+            "git_commit": env_commit or "unknown",
+            "dirty": False,
+            "py": sys.version.split()[0],
+            "built_at": datetime.utcnow().isoformat() + "Z",
+        }
+
+    # ---- git-based fallback ----
     def _run(cmd: list[str]) -> str | None:
         try:
             out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
@@ -35,7 +57,7 @@ def _compute_version() -> dict:
         "built_at": datetime.utcnow().isoformat() + "Z",
     }
 
-VERSION = _compute_version()
+# NOTE: removed the global VERSION = _compute_version()
 
 
 # --- Optional .env loading ----------------------------------------------------
@@ -580,16 +602,22 @@ STATE = {"running": False, "paused": False, "quality": 60}
 # -----------------------------------------------------------------------------
 @app.get("/api/health")
 def health():
+    v = _compute_version()
     payload = {
         "ok": True,
         "heartbeat": _heartbeat_status(),
-        **{k: v for k, v in VERSION.items() if k != "dirty"}  # omit 'dirty' here if you want
+        "app": v.get("app"),
+        "version": v.get("version"),
+        "git_commit": v.get("git_commit"),
+        "py": v.get("py"),
+        "built_at": v.get("built_at"),
+        # intentionally omitting 'dirty' from /api/health response
     }
     return payload
 
 @app.get("/api/version")
 def api_version():
-    return VERSION
+    return _compute_version()
 
 @app.get("/api/paths")
 def paths():
