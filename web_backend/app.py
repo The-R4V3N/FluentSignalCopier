@@ -428,6 +428,38 @@ def _heartbeat_status():
         return "dead"
     except Exception:
         return "dead"
+    
+def _heartbeat_info():
+    """
+    Returns (status, age_seconds, ts_seconds).
+
+    status: "ok" (<15s), "stale" (15–60s), "dead" (missing or >60s)
+    age_seconds: None if unknown
+    ts_seconds: the raw heartbeat timestamp in seconds (None if unknown)
+    """
+    try:
+        if not HEARTBEAT.exists():
+            return "dead", None, None
+
+        raw = _read_text_multi(HEARTBEAT)
+        digits = re.findall(r"\d+", raw)
+        if not digits:
+            return "dead", None, None
+
+        ts = int(digits[0])
+        if ts > 10_000_000_000:  # ms → s
+            ts //= 1000
+
+        age = max(0, int(time.time() - ts))
+        if age < 15:
+            status = "ok"
+        elif age < 60:
+            status = "stale"
+        else:
+            status = "dead"
+        return status, age, ts
+    except Exception:
+        return "dead", None, None
 
 def read_last_jsonl(path: Path, limit: int) -> List[Dict[str, Any]]:
     if not path.exists():
@@ -603,17 +635,24 @@ STATE = {"running": False, "paused": False, "quality": 60}
 @app.get("/api/health")
 def health():
     v = _compute_version()
+    hb_status, hb_age, hb_ts = _heartbeat_info()
     payload = {
         "ok": True,
-        "heartbeat": _heartbeat_status(),
+        "heartbeat": hb_status,
+        "heartbeat_age_seconds": hb_age,
+        "heartbeat_ts": hb_ts,
         "app": v.get("app"),
         "version": v.get("version"),
         "git_commit": v.get("git_commit"),
         "py": v.get("py"),
         "built_at": v.get("built_at"),
-        # intentionally omitting 'dirty' from /api/health response
     }
     return payload
+
+@app.get("/api/heartbeat")
+def api_heartbeat():
+    status, age, ts = _heartbeat_info()
+    return {"status": status, "age_seconds": age, "ts": ts}
 
 @app.get("/api/version")
 def api_version():
