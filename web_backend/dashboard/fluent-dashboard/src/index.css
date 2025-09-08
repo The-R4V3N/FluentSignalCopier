@@ -24,6 +24,9 @@
   --surface-2: rgba(255, 255, 255, 0.03);
   --border: rgba(255, 255, 255, 0.10);
   --border-strong: rgba(255, 255, 255, 0.18);
+  --surface-solid: #0f172a;
+  --overlay: rgba(0, 0, 0, 0.55);
+
 
   --link: #646cff;
   --link-hover: #535bf2;
@@ -67,6 +70,10 @@ html.light {
 
   /* neutral text (used in tables) */
   --signal-neutral: rgba(0, 0, 0, 0.80);
+
+  --surface-solid: #ffffff;
+  /* solid white in light */
+  --overlay: rgba(0, 0, 0, 0.35);
 }
 
 /* Dark marker (optional; tokens already default to dark) */
@@ -187,6 +194,14 @@ textarea {
 
   .elevate {
     box-shadow: var(--shadow);
+  }
+
+  .dialog {
+    background: var(--surface-solid);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    color: var(--text);
   }
 
   /* ---------- Table header helper ---------- */
