@@ -1,9 +1,10 @@
+// src/components/ChannelPerformance.tsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { api } from "../lib/api";
 
 export type ChanRow = {
     channel: string;
-    signal_score: number | null; // averaged per channel
+    signal_score: number | null;   // averaged per channel
     win_rate: number | null;
     opens: number;
     closes: number;
@@ -12,27 +13,29 @@ export type ChanRow = {
 };
 
 type RawRec = {
-    action?: string; // "OPEN" | "CLOSE" | ...
-    source?: string; // channel name (may be internal/blank for CLOSE)
+    action?: string;               // "OPEN" | "CLOSE" | ...
+    source?: string;               // channel name (may be internal/blank for CLOSE)
     symbol?: string;
     gid?: string | number;
     oid?: string | number;
-    id?: string | number; // sometimes OPENs use id only
-    ticket?: string | number; // present on CLOSE
+    id?: string | number;          // sometimes OPENs use id only
+    ticket?: string | number;      // present on CLOSE
     profit?: number | string;
     p?: number | string;
     pnl?: number | string;
     profit_usd?: number | string;
     net_profit?: number | string;
-    confidence?: number; // optional per-OPEN confidence (0..100)
-    score?: number; // optional per-OPEN score
-    signal_score?: number; // optional alt name
-    t?: number | string; // unix seconds
-    ts?: number | string; // alt time
-    time?: number | string; // alt time
+    confidence?: number;           // optional per-OPEN confidence (0..100)
+    score?: number;                // optional per-OPEN score
+    signal_score?: number;         // optional alt name
+    t?: number | string;           // unix seconds
+    ts?: number | string;          // alt time
+    time?: number | string;        // alt time
 };
 
-const INTERNAL_SOURCES = new Set(["", "EA", "GUI", "WEB", "SYSTEM", "BACKEND", "INTERNAL"]);
+const INTERNAL_SOURCES = new Set([
+    "", "EA", "GUI", "WEB", "SYSTEM", "BACKEND", "INTERNAL"
+]);
 
 // join key: prefer gid, then oid, then id (OPENs sometimes only have id)
 const keyFor = (r: RawRec) => String(r.gid ?? r.oid ?? r.id ?? "").trim();
@@ -41,8 +44,7 @@ function parseNumeric(x: any): number | null {
     if (x == null) return null;
     if (typeof x === "number" && Number.isFinite(x)) return x;
     if (typeof x === "string") {
-        // remove spaces and currency symbols, normalize comma decimals
-        const s = x.replace(/[^\d,.\-]/g, "").replace(/(\d),(?=\d{3}\b)/g, "$1"); // keep thousands, handle EU style
+        const s = x.replace(/[^\d,.\-]/g, "").replace(/(\d),(?=\d{3}\b)/g, "$1");
         const t = s.includes(",") && !s.includes(".") ? s.replace(",", ".") : s.replace(/,/g, "");
         const n = Number(t);
         return Number.isFinite(n) ? n : null;
@@ -52,7 +54,6 @@ function parseNumeric(x: any): number | null {
 }
 
 function pickProfit(rec: RawRec): number | null {
-    // Try the likely fields in order
     return (
         parseNumeric(rec.profit_usd) ??
         parseNumeric(rec.profit) ??
@@ -70,18 +71,14 @@ function coalesceTime(rec: RawRec): number | null {
 
 function fmtWhen(t?: number | null): string | null {
     if (!t || !Number.isFinite(t)) return null;
-    try {
-        return new Date(t * 1000).toLocaleString();
-    } catch {
-        return null;
-    }
+    try { return new Date(t * 1000).toLocaleString(); } catch { return null; }
 }
 
 /** Decide the canonical channel for a row.
  * 1) Prefer OPEN.source from gid/oid/id join
  * 2) Else for CLOSE with blank key/source, use heuristic:
- *    take the channel whose most recent OPEN in the *same symbol*
- *    occurred before the CLOSE time.
+ *    choose the channel whose most recent OPEN in the same symbol
+ *    occurred <= the CLOSE time.
  */
 function canonicalSource(
     row: RawRec,
@@ -94,29 +91,24 @@ function canonicalSource(
     const fromJoin = String(open?.source ?? row.source ?? "").trim();
     if (fromJoin && !INTERNAL_SOURCES.has(fromJoin)) return fromJoin;
 
-    // Heuristic: only for CLOSE rows with blank/unknown source
+    // Heuristic only for CLOSE rows
     if ((row.action ?? "").toUpperCase() !== "CLOSE") return "";
 
     const sym = (row.symbol || "").trim().toUpperCase();
     if (!sym) return "";
 
-    const closerTs = coalesceTime(row);
+    const tClose = coalesceTime(row);
     const perChan = latestOpenBySymbolAndChannel.get(sym);
     if (!perChan) return "";
 
-    // Find channel with the closest OPEN <= close time
-    let bestChan = "";
-    let bestTs = -1;
+    let best = ""; let bestTs = -1;
     for (const [chan, ts] of perChan) {
         if (INTERNAL_SOURCES.has(chan)) continue;
         if (typeof ts !== "number") continue;
-        if (closerTs !== null && ts > closerTs) continue; // OPEN after CLOSE -> ignore
-        if (ts > bestTs) {
-            bestTs = ts;
-            bestChan = chan;
-        }
+        if (tClose !== null && ts > tClose) continue; // OPEN after CLOSE → ignore
+        if (ts > bestTs) { bestTs = ts; best = chan; }
     }
-    return bestChan; // may be "" if none found
+    return best; // may be ""
 }
 
 type Props = {
@@ -132,16 +124,12 @@ type Props = {
 
 /* ---------- theme helpers ---------- */
 function tintStyle(colorVar: string, pct = 12): React.CSSProperties {
-    // Uses CSS color-mix with your tokens; works in light & dark
     return { background: `color-mix(in srgb, ${colorVar} ${pct}%, transparent)` };
 }
 const BUY_VAR = "var(--signal-buy, #22c55e)";
 const SCORE_VAR = "var(--signal-modify, #3b82f6)";
 
-/** ChannelPerformance
- * - Props are optional for backward-compat (`Dashboard` can render without handlers).
- * - Renders mobile cards on small screens, table on md+.
- */
+/** ChannelPerformance */
 export default function ChannelPerformance({ selected = null, onSelect, onSummary }: Props) {
     const [rows, setRows] = useState<ChanRow[]>([]);
     const polling = useRef<number | null>(null);
@@ -202,25 +190,23 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
             };
 
             const byChan = new Map<string, Acc>();
+            const BUCKET_UNKNOWN = "—";
 
             for (const rec of data) {
-                const canon = canonicalSource(rec, opensByKey, latestOpenBySymbolAndChannel);
-                if (!canon) continue; // drop EA/GUI/WEB/blank/unknown
+                let canon = canonicalSource(rec, opensByKey, latestOpenBySymbolAndChannel);
 
-                let acc = byChan.get(canon);
+                // Drop explicit internal sources; but KEEP unknowns in a "—" bucket
+                if (canon && INTERNAL_SOURCES.has(canon)) canon = "";
+
+                const channelKey = canon || BUCKET_UNKNOWN;
+
+                let acc = byChan.get(channelKey);
                 if (!acc) {
                     acc = {
-                        opens: 0,
-                        closes: 0,
-                        wins: 0,
-                        totalClosed: 0,
-                        confSum: 0,
-                        confN: 0,
-                        scoreSum: 0,
-                        scoreN: 0,
-                        lastT: undefined,
+                        opens: 0, closes: 0, wins: 0, totalClosed: 0,
+                        confSum: 0, confN: 0, scoreSum: 0, scoreN: 0, lastT: undefined,
                     };
-                    byChan.set(canon, acc);
+                    byChan.set(channelKey, acc);
                 }
 
                 const act = (rec.action ?? "").toUpperCase();
@@ -228,18 +214,12 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
                     acc.opens += 1;
 
                     if (typeof rec.confidence === "number") {
-                        acc.confSum += rec.confidence;
-                        acc.confN += 1;
+                        acc.confSum += rec.confidence; acc.confN += 1;
                     }
-
                     const scoreVal =
                         (typeof rec.signal_score === "number" ? rec.signal_score : null) ??
                         (typeof rec.score === "number" ? rec.score : null);
-
-                    if (scoreVal !== null) {
-                        acc.scoreSum += scoreVal!;
-                        acc.scoreN += 1;
-                    }
+                    if (scoreVal !== null) { acc.scoreSum += scoreVal!; acc.scoreN += 1; }
                 } else if (act === "CLOSE") {
                     acc.closes += 1;
                     acc.totalClosed += 1; // always count CLOSE in denominator
@@ -257,25 +237,23 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
                 const win_rate = a.totalClosed > 0 ? (a.wins / a.totalClosed) * 100 : null;
                 const avg_confidence = a.confN > 0 ? a.confSum / a.confN : null;
 
-                // Fallback: if no explicit score fields, use avg confidence as "signal score"
                 const explicitScore = a.scoreN > 0 ? a.scoreSum / a.scoreN : null;
                 const signal_score = explicitScore !== null ? explicitScore : avg_confidence;
 
                 out.push({
                     channel,
-                    signal_score,
-                    win_rate,
+                    signal_score: signal_score == null ? null : Number(signal_score.toFixed(1)),
+                    win_rate: win_rate == null ? null : Number(win_rate.toFixed(1)),
                     opens: a.opens,
                     closes: a.closes,
-                    avg_confidence,
+                    avg_confidence: avg_confidence == null ? null : Number(avg_confidence.toFixed(1)),
                     last_signal: fmtWhen(a.lastT ?? null),
                 });
             }
 
             // 4) Sort: by win %, then by closes desc, then by name
             out.sort((a, b) => {
-                const aw = a.win_rate ?? -1,
-                    bw = b.win_rate ?? -1;
+                const aw = a.win_rate ?? -1, bw = b.win_rate ?? -1;
                 if (bw !== aw) return bw - aw;
                 if (b.closes !== a.closes) return b.closes - a.closes;
                 return a.channel.localeCompare(b.channel);
@@ -312,8 +290,7 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
         };
 
         // Weighted overall win-rate across channels by number of closes
-        let weightedWins = 0,
-            totalCloses = 0;
+        let weightedWins = 0, totalCloses = 0;
         rows.forEach((r) => {
             if (typeof r.win_rate === "number" && r.closes > 0) {
                 weightedWins += (r.win_rate / 100) * r.closes;
@@ -390,23 +367,11 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
                             )}
                         </div>
                         <div className="mt-2 grid grid-cols-2 gap-1 text-sm muted">
-                            <div>
-                                <span>Score:</span>{" "}
-                                {typeof r.signal_score === "number" ? `${r.signal_score.toFixed(1)}%` : "—"}
-                            </div>
-                            <div>
-                                <span>Win rate:</span> {fmtPct(r.win_rate)}
-                            </div>
-                            <div>
-                                <span>Opens/Closes:</span> {r.opens}/{r.closes}
-                            </div>
-                            <div>
-                                <span>Avg conf:</span>{" "}
-                                {typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}
-                            </div>
-                            <div className="col-span-2">
-                                <span>Last:</span> {r.last_signal ?? "—"}
-                            </div>
+                            <div><span>Score:</span> {typeof r.signal_score === "number" ? `${r.signal_score.toFixed(1)}%` : "—"}</div>
+                            <div><span>Win rate:</span> {fmtPct(r.win_rate)}</div>
+                            <div><span>Opens/Closes:</span> {r.opens}/{r.closes}</div>
+                            <div><span>Avg conf:</span> {typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}</div>
+                            <div className="col-span-2"><span>Last:</span> {r.last_signal ?? "—"}</div>
                         </div>
                     </li>
                 ))}
@@ -418,68 +383,25 @@ export default function ChannelPerformance({ selected = null, onSelect, onSummar
                 <table className="w-full text-sm leading-6 card">
                     <thead className="sticky top-0 table-header">
                         <tr className="text-left muted">
-                            {["Channel", "Signal Score", "Win %", "Opens", "Closes", "Avg Conf", "Last Signal"].map(
-                                (h) => (
-                                    <th key={h} className="px-3 py-2">
-                                        {h}
-                                    </th>
-                                )
-                            )}
+                            {["Channel", "Signal Score", "Win %", "Opens", "Closes", "Avg Conf", "Last Signal"].map((h) => (
+                                <th key={h} className="px-3 py-2 whitespace-nowrap">{h}</th>
+                            ))}
                         </tr>
                     </thead>
                     <tbody className="[&>tr:nth-child(odd)]:[background:var(--surface-2)]">
                         {rows.map((r, i) => (
-                            <tr
-                                key={i}
-                                onClick={() => onRowClick(r)}
-                                className="transition-colors cursor-pointer border-t token-border hover:[background:var(--surface-2)]"
-                                style={rowTintStyle(r)}
-                                title="Click to filter Recent Signals by this channel"
-                            >
-                                <td className="px-3 py-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="truncate">{r.channel}</span>
-                                        {isBestWin(r) && (
-                                            <span
-                                                className="rounded px-1.5 py-0.5 text-[11px]"
-                                                style={{ ...tintStyle(BUY_VAR, 22), color: BUY_VAR }}
-                                            >
-                                                Top Win%
-                                            </span>
-                                        )}
-                                        {isBestScore(r) && (
-                                            <span
-                                                className="rounded px-1.5 py-0.5 text-[11px]"
-                                                style={{ ...tintStyle(SCORE_VAR, 22), color: SCORE_VAR }}
-                                            >
-                                                Top Score
-                                            </span>
-                                        )}
-                                        {selected === r.channel && (
-                                            <span className="rounded px-1.5 py-0.5 text-[11px]" style={{ background: "var(--surface-2)" }}>
-                                                Selected
-                                            </span>
-                                        )}
-                                    </div>
-                                </td>
-                                <td className="px-3 py-2 tabular-nums">
-                                    {typeof r.signal_score === "number" ? r.signal_score.toFixed(1) + "%" : "—"}
-                                </td>
-                                <td className="px-3 py-2 tabular-nums">{fmtPct(r.win_rate)}</td>
-                                <td className="px-3 py-2 tabular-nums">{r.opens}</td>
-                                <td className="px-3 py-2 tabular-nums">{r.closes}</td>
-                                <td className="px-3 py-2 tabular-nums">
-                                    {typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}
-                                </td>
+                            <tr key={i} className="border-t token-border hover:[background:var(--surface-2)] cursor-pointer" onClick={() => onRowClick(r)}>
+                                <td className="px-3 py-2">{r.channel}</td>
+                                <td className="px-3 py-2">{typeof r.signal_score === "number" ? `${r.signal_score.toFixed(1)}%` : "—"}</td>
+                                <td className="px-3 py-2">{fmtPct(r.win_rate)}</td>
+                                <td className="px-3 py-2">{r.opens}</td>
+                                <td className="px-3 py-2">{r.closes}</td>
+                                <td className="px-3 py-2">{typeof r.avg_confidence === "number" ? r.avg_confidence.toFixed(1) : "—"}</td>
                                 <td className="px-3 py-2">{r.last_signal ?? "—"}</td>
                             </tr>
                         ))}
                         {!rows.length && (
-                            <tr className="border-t token-border">
-                                <td className="px-3 py-6 muted" colSpan={7}>
-                                    No data yet.
-                                </td>
-                            </tr>
+                            <tr><td className="px-3 py-3 muted" colSpan={7}>No data yet.</td></tr>
                         )}
                     </tbody>
                 </table>
