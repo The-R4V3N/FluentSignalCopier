@@ -1,0 +1,109 @@
+name: Weekly AI Issue Triage
+
+on:
+  schedule:
+    - cron: "0 0 * * 0" # Sundays 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    outputs:
+      issues: ${{ steps.collect.outputs.issues }}
+    steps:
+      - name: Collect recent open issues (top 20)
+        id: collect
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const per_page = 20;
+            const { data } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page,
+              sort: "updated",
+              direction: "desc"
+            });
+            const issues = data
+              .filter(i => !i.pull_request)  // issues only
+              .map(i => ({ number: i.number }));
+            core.setOutput("issues", JSON.stringify(issues));
+
+  analyze:
+    needs: collect
+    if: ${{ needs.collect.outputs.issues != '[]' && needs.collect.outputs.issues != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(needs.collect.outputs.issues) }}
+    steps:
+      - name: Skip if we already left the weekly triage note
+        id: already
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = "<!-- weekly-ai-triage-v1 -->";
+            const number = ${{ matrix.issue.number }};
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              per_page: 100,
+            });
+            core.setOutput("seen", comments.some(c => (c.body || "").includes(token)) ? "true" : "false");
+
+      - name: Fetch issue content
+        if: steps.already.outputs.seen != 'true'
+        id: fetch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = ${{ matrix.issue.number }};
+            const { data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number
+            });
+            core.setOutput("title", issue.title || "");
+            core.setOutput("body", issue.body || "");
+
+      - name: AI triage suggestion
+        if: steps.already.outputs.seen != 'true'
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-4o-mini
+          prompt: |
+            You are assisting with weekly issue triage. For the issue below, briefly suggest:
+            - probable type: bug / enhancement / question
+            - next action: (ask for info / add reproduction / add logs / label X / assign to area Y / close as duplicate if clear)
+            - optional labels that could help (2-3 max)
+            Keep it short (3-5 lines).
+
+            Title: ${{ steps.fetch.outputs.title }}
+            Body: ${{ steps.fetch.outputs.body }}
+
+      - name: Comment triage result
+        if: steps.already.outputs.seen != 'true' && steps.ai.outputs.response != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = ${{ matrix.issue.number }};
+            const body = `${{ toJson(steps.ai.outputs.response) }}\n\n<!-- weekly-ai-triage-v1 -->`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+              body
+            });

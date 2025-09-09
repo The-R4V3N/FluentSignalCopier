@@ -1,0 +1,53 @@
+name: Issue Completeness Check
+
+on:
+  issues:
+    types: [opened, reopened, edited]
+
+permissions:
+  issues: write
+  models: read
+
+jobs:
+  check-completeness:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip if we already commented once (idempotent)
+        id: already
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = "<!-- completeness-check-v1 -->";
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            core.setOutput("seen", comments.some(c => (c.body || "").includes(token)) ? "true" : "false");
+
+      - name: Analyze completeness
+        if: steps.already.outputs.seen != 'true'
+        uses: actions/ai-inference@v1
+        id: ai
+        with:
+          model: openai/gpt-4o-mini
+          prompt: |
+            Analyze this GitHub issue for completeness. If missing reproduction steps, version info, or expected/actual behavior, respond with a friendly, concise request for the missing info. If complete, say so briefly.
+
+            Title: ${{ github.event.issue.title }}
+            Body: ${{ github.event.issue.body }}
+
+      - name: Comment on issue
+        if: steps.already.outputs.seen != 'true' && steps.ai.outputs.response != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `${{ toJson(steps.ai.outputs.response) }}\n\n<!-- completeness-check-v1 -->`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

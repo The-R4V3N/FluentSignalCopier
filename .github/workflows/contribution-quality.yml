@@ -1,0 +1,75 @@
+name: Contribution Quality Check
+
+on:
+  pull_request:
+    types: [opened, reopened, edited]
+  issues:
+    types: [opened, reopened, edited]
+
+permissions:
+  pull-requests: write
+  issues: write
+  models: read
+
+jobs:
+  quality-check:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure labels exist (spam, ai-generated, needs-review)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const desired = [
+              { name: "spam", color: "b60205", description: "Obvious spam content" },
+              { name: "ai-generated", color: "5319e7", description: "Likely AI-generated slop" },
+              { name: "needs-review", color: "fbca04", description: "Low-quality; needs human review" },
+            ];
+            for (const lbl of desired) {
+              try {
+                await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: lbl.name });
+              } catch {
+                await github.rest.issues.createLabel({ owner: context.repo.owner, repo: context.repo.repo, name: lbl.name, color: lbl.color, description: lbl.description });
+              }
+            }
+
+      - name: Detect spam or low-quality content
+        id: ai
+        uses: actions/ai-inference@v1
+        with:
+          model: openai/gpt-4o-mini
+          prompt: |
+            Is this GitHub ${{ github.event_name == 'issues' && 'issue' || 'pull request' }} spam, AI-generated slop, or low quality?
+
+            Title: ${{ github.event.issue.title || github.event.pull_request.title }}
+            Body: ${{ github.event.issue.body || github.event.pull_request.body }}
+
+            Respond with exactly one of: spam, ai-generated, needs-review, or ok
+
+      - name: Apply label if needed
+        if: steps.ai.outputs.response != 'ok'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const label = `${{ steps.ai.outputs.response }}`.trim();
+            const number = (context.eventName === 'issues')
+              ? context.payload.issue.number
+              : context.payload.pull_request.number;
+
+            if (!label || label === 'ok') return;
+
+            const { data: current } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: number,
+            });
+
+            const exists = (current.labels || []).some(l => (typeof l === 'string' ? l : l.name) === label);
+            if (!exists) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: number,
+                labels: [label],
+              });
+            }
