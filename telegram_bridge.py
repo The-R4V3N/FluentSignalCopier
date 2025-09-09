@@ -246,7 +246,7 @@ BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)
 RISK_PCT_RE      = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
 HALF_RISK_RE     = re.compile(r'\bHALF\s*RISK\b', re.I)
 DOUBLE_RISK_RE   = re.compile(r'\bDOUBLE\s*RISK\b', re.I)
-QUARTER_RISK_RE  = re.compile(r'\b(QUARTER|1/4)\s*RISK\b', re.I)
+QUARTER_RISK_RE  = re.compile(r'\b(?:QUARTER|1/4)\s*RISK\b', re.I)
 SMALL_LOTS_RE    = re.compile(r'\b(SMALL\s*LOTS|USE\s*SMALL\s*LOTS)\b', re.I)
 
 # Close phrases (expanded)
@@ -480,11 +480,13 @@ def parse_block_style(text: str):
     elif NOW_MARKET_RE.search(t):
         order_type = "MARKET"
 
-    # 8)Risk & lots overrides
+    # 8) # --- Risk & lots overrides ---
     risk_percent = None
     m = RISK_PCT_RE.search(t)
     if m:
-        risk_percent = num(m.group(1))
+        risk_percent = num(m.group(1))               # "risk 0.75" or "risk 75%"
+        # If author writes "risk 75%", you can convert to 0.75 if you prefer:
+        # if risk_percent and risk_percent > 2: risk_percent = risk_percent / 100.0
     elif HALF_RISK_RE.search(t):     risk_percent = 0.5
     elif DOUBLE_RISK_RE.search(t):   risk_percent = 2.0
     elif QUARTER_RISK_RE.search(t):  risk_percent = 0.25
