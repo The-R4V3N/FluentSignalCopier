@@ -6,6 +6,7 @@ export type Rec = {
     sl?: number; tps?: number[]; source?: string;
     confidence?: number;
     new_sl?: number; new_tps_csv?: string; tp_slot?: number; tp_to?: number;
+    risk_percent?: number;
 };
 
 export type RecentSignalsTableProps = { rows: Rec[] };
@@ -29,13 +30,20 @@ function bgTintStyle(color: string, opacityPercent = 18): React.CSSProperties {
     return { backgroundColor: `color-mix(in srgb, ${color} ${opacityPercent}%, transparent)` };
 }
 
+function fmtRisk(v: unknown): string {
+    const n = typeof v === "number" ? v : Number(v);
+    if (!Number.isFinite(n)) return "—";
+    // Heuristic: small numbers are multipliers; larger look like percentages
+    return n <= 3 ? `${n}×` : `${n}%`;
+}
+
 const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
     return (
         <div className="card overflow-x-auto">
-            <table className="w-full min-w-[700px] text-sm leading-6">
+            <table className="w-full min-w-[760px] text-sm leading-6">
                 <thead className="sticky top-0 table-header">
                     <tr className="text-left muted">
-                        {["Time", "Action", "Symbol", "Side", "Entry/Type", "Details", "Channel"].map(
+                        {["Time", "Action", "Symbol", "Side", "Entry/Type", "Risk", "Details", "Channel"].map(
                             (h) => (
                                 <th key={h} className="px-3 py-2 whitespace-nowrap">
                                     {h}
@@ -80,6 +88,7 @@ const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
                                 <td className="px-3 py-2">{r.symbol}</td>
                                 <td className="px-3 py-2">{r.side || ""}</td>
                                 <td className="px-3 py-2 tabular-nums">{entry}</td>
+                                <td className="px-3 py-2 tabular-nums">{fmtRisk((r as any).risk_percent ?? (r as any).risk)}</td>
                                 <td className="px-3 py-2 tabular-nums">{details}</td>
                                 <td className="px-3 py-2">{r.source || ""}</td>
                             </tr>

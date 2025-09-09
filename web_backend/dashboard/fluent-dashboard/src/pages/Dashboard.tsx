@@ -38,6 +38,7 @@ function normalizeRec(r: any): SignalRec | null {
         tps: r.tps ?? r.tp_list ?? (typeof r.tp === "number" ? [r.tp] : r.tp),
         source: r.source ?? r.channel,
         confidence: r.confidence,
+        risk_percent: r.risk_percent ?? r.risk ?? null,
         new_sl: r.new_sl,
         new_tps_csv: r.new_tps_csv,
         tp_slot: r.tp_slot,

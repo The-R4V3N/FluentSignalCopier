@@ -1106,21 +1106,19 @@ def api_history(limit: int = 100):
             "symbol": r.get("symbol"),
             "side": r.get("side"),
             "order_type": r.get("order_type") or r.get("type"),
-            "entry": r.get("entry") or r.get("price") or r.get("entry_price"),
-            "entry_ref": r.get("entry_ref"),
-            "sl": r.get("sl") or r.get("stop_loss") or r.get("stoploss"),
-            "tps": (
-                r.get("tps")
-                or r.get("tp_list")
-                or ([r.get("tp")] if isinstance(r.get("tp"), (int, float)) else None)
-            ),
-            "source": r.get("source") or r.get("channel"),
-            "confidence": r.get("confidence"),
-            "new_sl": r.get("new_sl"),
-            "new_tps_csv": r.get("new_tps_csv"),
-            "tp_slot": r.get("tp_slot"),
-            "tp_to": r.get("tp_to"),
-        }
+        "entry": r.get("entry") or r.get("price") or r.get("entry_price"),
+        "entry_ref": r.get("entry_ref"),
+        "sl": r.get("sl") or r.get("stop_loss") or r.get("stoploss"),
+        "tps": (r.get("tps") or r.get("tp_list")
+                or ([r.get("tp")] if isinstance(r.get("tp"), (int, float)) else None)),
+        "source": r.get("source") or r.get("channel"),
+        "confidence": r.get("confidence"),
+        "new_sl": r.get("new_sl"),
+        "new_tps_csv": r.get("new_tps_csv"),
+        "tp_slot": r.get("tp_slot"),
+        "tp_to": r.get("tp_to"),
+        "risk_percent": r.get("risk_percent") or r.get("risk"),
+    }
 
     items = [norm(x) for x in raw]
     # ensure newest first (some tails already return newest-first; we sort anyway)

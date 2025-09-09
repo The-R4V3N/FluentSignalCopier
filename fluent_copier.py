@@ -207,24 +207,20 @@ SYM_RE = re.compile(
 )
 SIDE_RE  = re.compile(r'\b(BUY|SELL)\b', re.I)
 ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(-?\d+(?:[.,]\d+)?)\b', re.I)
-# SL_RES = [
-#     re.compile(r'\b(?:STOP\s*LOSS|STOPLOSS)\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-#     re.compile(r'\bSL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-#     re.compile(r'^\s*SL\b[^0-9-]*?@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-# ]
 SL_RES = re.compile(
     r'(?im)^\s*(?:SL|S/L|STOP\s*LOSS|STOPLOSS)\s*(?:@|:)?\s*([+\-]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*$'
 )
-TP_RES = [
-    # "TP @ 198.600", "TP@198.600"
-    re.compile(r'\bTP\d*\s*@\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-
-    # "TP1 198.600", "TP 198.600", "TP1 = 198.600", "TP1 -> 198.600"
-    re.compile(r'\bTP\d*\s*(?:at|=|->)?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
-
-    # line starts with TP… followed by a price
-    re.compile(r'^\s*TP\d*\s*@?\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
+# --- SL: make it a list, since _try_sl() iterates over it
+SL_RES = [
+    re.compile(
+        r'(?im)^\s*(?:SL|S/L|STOP\s*LOSS|STOPLOSS)\s*(?:@|:)?\s*([+\-]?\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?|\d+(?:[.,]\d+)?)\s*$'
+    )
 ]
+
+# Extra "risk" cues (multipliers)
+RISK_R_RE = re.compile(r'\b(\d+(?:[.,]\d+)?)\s*(?:x|×)?\s*r\b', re.I)       # "0.5R", "2R", "1.25xR"
+HALF_FRACTION_RE = re.compile(r'\b(?:1/2|½)\s*(?:risk|r)\b', re.I)          # "1/2 risk", "½ risk"
+QUARTER_FRACTION_RE = re.compile(r'\b(?:1/4|¼)\s*(?:risk|r)\b', re.I)       # "1/4 risk", "¼ risk"
 
 # --- Order-type cues ---
 # Header like: "#EURUSD Buy Limit @ 1.15500"
@@ -422,13 +418,34 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     if not (side and symbol):
         return None
 
-    # Risk %
-    risk=None
-    m=RISK_PCT_RE.search(t)
-    if m: risk=_num(m.group(1))
-    elif HALF_RISK_RE.search(t): risk=0.5
-    elif DOUBLE_RISK_RE.search(t): risk=2.0
-    elif QUARTER_RISK_RE.search(t): risk=0.25
+   # --- Risk: percent (override) vs multiplier (relative to EA default) ---
+    risk_percent: Optional[float] = None
+    risk_multiplier: Optional[float] = None
+    risk_label: Optional[str] = None
+
+    m = RISK_PCT_RE.search(t)  # e.g. "risk 0.5%" or "risk 1 %"
+    if m:
+        v = _num(m.group(1))
+        if v is not None:
+            risk_percent = v
+            risk_label = f"{v}%"
+    else:
+        # "0.5R", "2R", "1.25xR", etc. → multiplier
+        m = RISK_R_RE.search(t)
+        if m:
+            v = _num(m.group(1))
+            if v is not None:
+                risk_multiplier = v
+                risk_label = f"{v}R"
+        elif HALF_RISK_RE.search(t) or HALF_FRACTION_RE.search(t):
+            risk_multiplier = 0.5
+            risk_label = "half"
+        elif DOUBLE_RISK_RE.search(t):
+            risk_multiplier = 2.0
+            risk_label = "double"
+        elif QUARTER_RISK_RE.search(t) or QUARTER_FRACTION_RE.search(t):
+            risk_multiplier = 0.25
+            risk_label = "quarter"
 
     # IMPORTANT: If order_type is MARKET, we treat “entry” as a *reference only*.
     # Do not output 'entry' (so the EA won’t open a pending by mistake).
@@ -442,13 +459,16 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         "symbol": symbol,
         "order_type": order_type,   # "MARKET" | "LIMIT" | "STOP"
         "entry": entry,             # None for MARKET
-        "entry_ref": entry_ref,     # preserves original number for logs
+        "entry_ref": entry_ref,     # reference only
         "sl": sl,
         "tps": tps,
         "be_on_tp": be_on_tp,
-        "risk": risk,
-    }
 
+        # New: risk outputs (both optional)
+        "risk_percent": risk_percent,         # explicit percent (e.g., 0.5 means 0.5%)
+        "risk_multiplier": risk_multiplier,   # relative to EA's InpRiskPercent (e.g., 0.5R)
+        "risk_label": risk_label,
+    }
 
 # =====================================================================
 # Chat Picker Dialog
@@ -908,23 +928,34 @@ class CopierThread(QThread):
                         "raw": (txt.strip()[:1000]),
                         "side": p["side"],
                         "symbol": sym,
-                    
+
                         # Order typing
-                        "order_type": p.get("order_type") or "MARKET",                  # "MARKET" | "LIMIT" | "STOP"
-                        "entry": p.get("entry"),                                        # None for MARKET
-                        "entry_ref": p.get("entry_ref"),                                # reference only (always safe to log)
-                    
+                        "order_type": p.get("order_type") or "MARKET",
+                        "entry": p.get("entry"),         # None for MARKET
+                        "entry_ref": p.get("entry_ref"),
+
                         "sl": p.get("sl"),
-                        "tp": tp_first,                                                 # legacy single TP for EA
-                        "tps": tps_list,                                                # structured list
-                        "tps_csv": tps_csv,                                             # legacy CSV
-                        "risk_percent": (1.0 if p.get("risk") is None else p["risk"]),
+                        "tp": (tps_list[0] if tps_list else None),  # legacy single TP
+                        "tps": tps_list,
+                        "tps_csv": tps_csv,
+
+                        # keep these always
                         "lots": None,
                         "be_on_tp": int(p.get("be_on_tp") or 0),
                         "gid": str(gid),
                         "original_event_id": str(event.id),
                         "confidence": conf,
                     }
+
+                    # Only add risk fields if provided by the parser:
+                    if p.get("risk_percent") is not None:
+                        rec["risk_percent"] = p["risk_percent"]
+
+                    if p.get("risk_multiplier") is not None:
+                        rec["risk_multiplier"] = p["risk_multiplier"]
+                        if p.get("risk_label"):
+                            rec["risk_label"] = p["risk_label"]
+
                     with self.signal_file.open("a", encoding="utf-8") as f:
                         f.write(json.dumps(rec, ensure_ascii=True) + "\n"); f.flush(); os.fsync(f.fileno())
                     self.last_open_oid[(source_key, sym)] = msg_id

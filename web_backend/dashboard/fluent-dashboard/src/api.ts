@@ -25,6 +25,59 @@ export type Paths = {
     saved_settings: Record<string, unknown>;
 };
 
+export type SignalAction =
+    | "OPEN"
+    | "CLOSE"
+    | "MODIFY"
+    | "MODIFY_TP"
+    | "EMERGENCY_CLOSE_ALL";
+
+export type OrderType = "MARKET" | "LIMIT" | "STOP";
+
+export interface Signal {
+    // common
+    action: SignalAction;
+    t: number;                 // unix seconds
+    id?: string;
+    gid?: string;
+    source?: string;
+    source_id?: string;
+    original_event_id?: string;
+    confidence?: number;
+
+    // symbol/side
+    symbol?: string;
+    side?: "BUY" | "SELL";
+
+    // OPEN
+    order_type?: OrderType;
+    entry?: number | null;     // null for MARKET
+    entry_ref?: number | null; // reference only for MARKET
+    sl?: number | null;
+    tp?: number | null;
+    tps?: number[];
+    tps_csv?: string;
+    be_on_tp?: 0 | 1;
+
+    // NEW: risk for OPEN (1.0 = normal, 0.5 = half, 2.0 = double…)
+    risk_percent?: number;
+
+    // MODIFY
+    new_sl?: number | null;
+    new_tps_csv?: string;
+
+    // MODIFY_TP
+    tp_slot?: number;
+    tp_to?: number;
+
+    // CLOSE
+    oid?: string;
+
+    // optional, may be filled by EA
+    lots?: number | null;
+    profit?: number | null;
+}
+
 // Prefer the page origin; fall back to env if provided.
 const ORIGIN = (import.meta as any)?.env?.VITE_API_BASE?.trim() || window.location.origin;
 const API = ORIGIN.replace(/\/$/, "");
@@ -53,7 +106,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 export const api = {
     getMetrics: () => get<Metrics>("/api/metrics"),
     getPaths: () => get<Paths>("/api/paths"),
-    getSignals: (limit = 200) => get<any[]>(`/api/signals?limit=${limit}`),
+    getSignals: (limit = 200) => get<Signal[]>(`/api/signals?limit=${limit}`),
     getPositions: () => get<any[]>("/api/positions"),
     getSettings: () => get<any>("/api/settings"),
     saveSettings: (s: any) => post<any>("/api/settings", s),

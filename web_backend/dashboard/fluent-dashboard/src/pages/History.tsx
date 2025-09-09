@@ -17,6 +17,7 @@ type Row = Rec & {
     t?: number | string;
     ts?: number | string;
     time?: number | string;
+    risk_percent?: number;
 };
 
 const INTERNAL_SOURCES = new Set([

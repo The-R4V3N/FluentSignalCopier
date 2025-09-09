@@ -268,6 +268,17 @@ TP_MOVE_PATTERNS = [
     re.compile(r'\btp\s*(\d{1,2})\s*(?:moved\s*to|now\s*(?:at|to)?)\s*(-?\d+(?:[.,]\d+)?)\b', re.I),
 ]
 
+# add next to RISK_PCT_RE
+RISK_PCT_RE = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
+RISK_X_RE   = re.compile(r'\b(\d+(?:[.,]\d+)?)\s*x\s*risk\b|\brisk\s*(\d+(?:[.,]\d+)?)\s*x\b', re.I)
+
+_FRACTIONAL_RISK_WORDS = {
+    "half": 0.5, "½": 0.5,
+    "quarter": 0.25, "¼": 0.25,
+    "third": 1/3, "⅓": 1/3,
+    "two thirds": 2/3, "⅔": 2/3,
+}
+
 def _try_sl(text: str) -> Optional[float]:
     m = SL_RES.search(text)
     if not m:
@@ -298,6 +309,40 @@ def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
                     slot = int(g1)
             out.append({"slot": slot, "to": to_val})
     return out
+
+def _parse_risk_percent(text: str) -> Optional[float]:
+    """Return a numeric risk value from common phrasings.
+    Interprets bare numbers as % (1 -> 1%), words like 'half risk' as multipliers (0.5)."""
+    t = text or ""
+    # 1) explicit %/number after 'risk'
+    m = RISK_PCT_RE.search(t)
+    if m:
+        v = _num(m.group(1))
+        if v is not None:
+            return float(v)  # treat as percentage value
+
+    # 2) '0.5x risk' / 'risk 0.5x'
+    m = RISK_X_RE.search(t)
+    if m:
+        v = _num(m.group(1) or m.group(2))
+        if v is not None:
+            return float(v)  # multiplier (0.5, 2, etc.)
+
+    # 3) worded fractions: 'half risk', 'risk half', 'quarter risk'
+    low = t.lower()
+    for word, val in _FRACTIONAL_RISK_WORDS.items():
+        if re.search(fr'\b{word}\s*risk\b', low) or re.search(fr'\brisk\s*{word}\b', low):
+            return float(val)
+
+    # 4) simple fractions: '1/2 risk', 'risk 1/3'
+    m = re.search(r'\b(\d+)\s*/\s*(\d+)\s*risk\b|\brisk\s*(\d+)\s*/\s*(\d+)\b', low)
+    if m:
+        a = _num(m.group(1) or m.group(3))
+        b = _num(m.group(2) or m.group(4))
+        if a and b and b != 0:
+            return float(a / b)
+
+    return None
 
 def parse_message(text: str) -> Optional[Dict[str, Any]]:
     """Parse a message into a signal dictionary."""
@@ -401,10 +446,7 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         return None
 
     # Risk parsing
-    risk = None
-    m = RISK_PCT_RE.search(t)
-    if m:
-        risk = _num(m.group(1))
+    risk = _parse_risk_percent(t)
 
     # For MARKET orders, entry is reference only
     entry_ref = entry
@@ -1438,6 +1480,14 @@ class DashboardPage(QWidget):
             if tps:
                 parts.append(", ".join(f"TP{i}: {v}" for i, v in enumerate(tps, 1)))
             details = " | ".join(parts)
+
+            risk = signal_data.get('risk_percent')
+            if risk is not None:
+                # cosmetic: show as “Risk: 0.5x” for multipliers, or “Risk: 50%” for percents
+                if risk <= 3:  # heuristic: treat small numbers as multipliers
+                    parts.append(f"Risk: {risk}x")
+                else:
+                    parts.append(f"Risk: {risk}%")
 
         elif action == "CLOSE":
             entry_price = "Market Close"
