@@ -13,6 +13,8 @@ type Row = Rec & {
     oid?: string | number;
     id?: string | number;
     source?: string;
+    result?: "WIN" | "LOSS" | "BREAKEVEN";
+    pnl?: number;              // realized PnL in account currency
     symbol?: string;
     t?: number | string;
     ts?: number | string;
@@ -111,8 +113,8 @@ export default function HistoryPage() {
     useEffect(() => {
         (async () => {
             try {
-                const data = await fetch("/api/signals?limit=200").then(r => r.json());
-                setRows(Array.isArray(data) ? (data as Rec[]) : []);
+                const data = await fetch("/api/history?limit=200").then(r => r.json());
+                setRows(Array.isArray(data?.items) ? (data.items as Rec[]) : []);
             } catch {
                 setRows([]);
             }

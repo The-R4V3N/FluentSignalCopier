@@ -7,6 +7,8 @@ export type Rec = {
     confidence?: number;
     new_sl?: number; new_tps_csv?: string; tp_slot?: number; tp_to?: number;
     risk_percent?: number;
+    result?: "WIN" | "LOSS" | "BREAKEVEN";
+    pnl?: number | string | null;
 };
 
 export type RecentSignalsTableProps = { rows: Rec[] };
@@ -37,19 +39,54 @@ function fmtRisk(v: unknown): string {
     return n <= 3 ? `${n}×` : `${n}%`;
 }
 
+function ResultBadge({ result }: { result?: string }) {
+    if (!result) return <span className="text-[var(--muted)]">—</span>;
+    const cls =
+        result === "WIN"
+            ? "bg-green-500/15 text-green-400"
+            : result === "LOSS"
+                ? "bg-red-500/15 text-red-400"
+                : "bg-[var(--surface)] text-[var(--muted)]";
+    return (
+        <span className={`px-2 py-0.5 rounded-md text-sm font-medium ${cls}`}>
+            {result}
+        </span>
+    );
+}
+
+function PnlCell({ pnl }: { pnl?: number | string | null }) {
+    if (pnl === undefined || pnl === null || pnl === "") {
+        return <span className="text-[var(--muted)]">—</span>;
+    }
+    const n = typeof pnl === "number" ? pnl : Number(String(pnl).replace(",", "."));
+    if (!Number.isFinite(n)) return <span className="text-[var(--muted)]">—</span>;
+    const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+    const cls = n > 0 ? "text-green-400" : n < 0 ? "text-red-400" : "text-[var(--muted)]";
+    return <span className={`font-semibold tabular-nums ${cls}`}>{sign}{Math.abs(n).toFixed(2)}</span>;
+}
+
 const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
     return (
         <div className="card overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm leading-6">
+            <table className="w-full min-w-[900px] text-sm leading-6">
                 <thead className="sticky top-0 table-header">
                     <tr className="text-left muted">
-                        {["Time", "Action", "Symbol", "Side", "Entry/Type", "Risk", "Details", "Channel"].map(
-                            (h) => (
-                                <th key={h} className="px-3 py-2 whitespace-nowrap">
-                                    {h}
-                                </th>
-                            )
-                        )}
+                        {[
+                            "Time",
+                            "Action",
+                            "Symbol",
+                            "Side",
+                            "Entry/Type",
+                            "Risk",
+                            "Details",
+                            "Channel",
+                            "Result",
+                            "PnL",
+                        ].map((h) => (
+                            <th key={h} className="px-3 py-2 whitespace-nowrap">
+                                {h}
+                            </th>
+                        ))}
                     </tr>
                 </thead>
 
@@ -74,6 +111,7 @@ const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
                                     : (r.entry as any) ?? "";
 
                         const baseColor = actionColorVar(r.action, r.side);
+                        const isClose = (r.action || "").toUpperCase() === "CLOSE";
 
                         return (
                             <tr
@@ -88,9 +126,19 @@ const RecentSignalsTable: React.FC<RecentSignalsTableProps> = ({ rows }) => {
                                 <td className="px-3 py-2">{r.symbol}</td>
                                 <td className="px-3 py-2">{r.side || ""}</td>
                                 <td className="px-3 py-2 tabular-nums">{entry}</td>
-                                <td className="px-3 py-2 tabular-nums">{fmtRisk((r as any).risk_percent ?? (r as any).risk)}</td>
+                                <td className="px-3 py-2 tabular-nums">
+                                    {fmtRisk((r as any).risk_percent ?? (r as any).risk)}
+                                </td>
                                 <td className="px-3 py-2 tabular-nums">{details}</td>
                                 <td className="px-3 py-2">{r.source || ""}</td>
+
+                                {/* NEW cells */}
+                                <td className="px-3 py-2">
+                                    {isClose ? <ResultBadge result={r.result} /> : <span className="text-[var(--muted)]">—</span>}
+                                </td>
+                                <td className="px-3 py-2">
+                                    {isClose ? <PnlCell pnl={r.pnl} /> : <span className="text-[var(--muted)]">—</span>}
+                                </td>
                             </tr>
                         );
                     })}

@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Iterable, Dict, Any
+from glob import glob
 import asyncio, json, time, os, sys, re
 import shutil
 import subprocess
@@ -312,6 +313,108 @@ def _read_text_multi(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
         return ""
+
+# -----------------------------------------------------------------------------
+# Close with PnL
+# -----------------------------------------------------------------------------
+def _enrich_closes_with_pnl(rows: list[dict]) -> list[dict]:
+    """
+    Attach 'pnl' (float) and 'result' ('WIN'|'LOSS'|'BREAKEVEN') to CLOSE rows.
+
+    It tries several common ledgers:
+      - Fluent_positions.json
+      - positions.json
+      - trades.jsonl / Fluent_trades.jsonl  (json-lines)
+    And matches by one of: (gid|oid|ticket|order_id) + symbol.
+    """
+    if not rows:
+        return rows
+
+    # Build fast lookups for CLOSE rows we want to enrich
+    closes_idx = []
+    for i, r in enumerate(rows):
+        if str(r.get("action", "")).upper() == "CLOSE":
+            closes_idx.append(i)
+
+    if not closes_idx:
+        return rows
+
+    def _key(r: dict) -> tuple:
+        # Try the most stable identifiers first; fall back to None
+        for k in ("gid", "oid", "ticket", "order_id", "id"):
+            v = r.get(k)
+            if v not in (None, "", 0):
+                return (str(v), r.get("symbol", ""))
+        # Fallback: time+symbol (weak)
+        return (f"{r.get('t','')}", r.get("symbol",""))
+
+    need = {_key(rows[i]) for i in closes_idx}
+
+    # Load possible ledgers
+    candidates = [
+        "Fluent_positions.json",
+        "positions.json",
+        "Fluent_trades.jsonl",
+        "trades.jsonl",
+    ]
+    ledgers = []
+    for pat in candidates:
+        for p in glob(pat):
+            ledgers.append(p)
+
+    # Build a map: (id, symbol) -> {pnl: float}
+    pnl_map: dict[tuple, dict] = {}
+    for path in ledgers:
+        try:
+            if path.endswith(".jsonl"):
+                with open(path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            j = json.loads(line)
+                        except Exception:
+                            continue
+                        if str(j.get("action","")).upper() != "CLOSE":
+                            continue
+                        k = _key(j)
+                        if k in need:
+                            pnl = j.get("pnl", j.get("profit", j.get("pl")))
+                            if pnl is not None:
+                                pnl_map[k] = {
+                                    "pnl": float(pnl),
+                                }
+            else:
+                with open(path, "r", encoding="utf-8") as f:
+                    j = json.load(f)
+                # accept either list or {items:[...]}
+                items = j if isinstance(j, list) else j.get("items", [])
+                for it in items:
+                    if str(it.get("action","")).upper() != "CLOSE":
+                        continue
+                    k = _key(it)
+                    if k in need:
+                        pnl = it.get("pnl", it.get("profit", it.get("pl")))
+                        if pnl is not None:
+                            pnl_map[k] = {
+                                "pnl": float(pnl),
+                            }
+        except Exception:
+            # non-fatal; we just skip unreadable ledgers
+            continue
+
+    # Apply to rows
+    for i in closes_idx:
+        r = rows[i]
+        k = _key(r)
+        extra = pnl_map.get(k)
+        if not extra:
+            continue
+        pnl = extra.get("pnl")
+        if pnl is None:
+            continue
+        r["pnl"] = pnl
+        r["result"] = "BREAKEVEN" if abs(pnl) < 1e-6 else ("WIN" if pnl > 0 else "LOSS")
+
+    return rows
 
 # --- Channels aggregation -----------------------------------------------------
 from dataclasses import dataclass, asdict
@@ -793,7 +896,7 @@ async def ws_events(ws: WebSocket):
         while True:
             await asyncio.sleep(0.8)
 
-            # if path changed at runtime (mt5_dir switched), reset
+            # path may change if mt5_dir switches
             if str(SIGNALS) != last_path:
                 last_path = str(SIGNALS)
                 try:
@@ -827,10 +930,30 @@ async def ws_events(ws: WebSocket):
                     continue
 
                 last_size = size
+
+                # Parse all new lines into JSON objects
+                batch = []
                 for ln in chunk.splitlines():
                     ln = ln.strip()
-                    if ln:
+                    if not ln:
+                        continue
+                    try:
+                        obj = json.loads(ln)
+                        batch.append(obj)
+                    except Exception:
+                        # if a line is malformed, just forward it as-is for visibility
                         await ws.send_text(ln)
+                        continue
+
+                if not batch:
+                    continue
+
+                # Enrich CLOSE rows with pnl/result
+                batch = _enrich_closes_with_pnl(batch)
+
+                # Send as JSON strings (frontend already JSON.parses)
+                for obj in batch:
+                    await ws.send_text(json.dumps(obj))
     except WebSocketDisconnect:
         return
 
@@ -1098,6 +1221,9 @@ def api_history(limit: int = 100):
     limit = max(1, min(int(limit), 500))  # safety clamp
     raw = read_last_jsonl(SIGNALS, limit)
 
+    # enrich CLOSE lines with pnl/result if we can find them
+    raw = _enrich_closes_with_pnl(raw)
+
     # normalize common fields into your RecentSignalsTable Rec shape
     def norm(r: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -1106,22 +1232,32 @@ def api_history(limit: int = 100):
             "symbol": r.get("symbol"),
             "side": r.get("side"),
             "order_type": r.get("order_type") or r.get("type"),
-        "entry": r.get("entry") or r.get("price") or r.get("entry_price"),
-        "entry_ref": r.get("entry_ref"),
-        "sl": r.get("sl") or r.get("stop_loss") or r.get("stoploss"),
-        "tps": (r.get("tps") or r.get("tp_list")
-                or ([r.get("tp")] if isinstance(r.get("tp"), (int, float)) else None)),
-        "source": r.get("source") or r.get("channel"),
-        "confidence": r.get("confidence"),
-        "new_sl": r.get("new_sl"),
-        "new_tps_csv": r.get("new_tps_csv"),
-        "tp_slot": r.get("tp_slot"),
-        "tp_to": r.get("tp_to"),
-        "risk_percent": r.get("risk_percent") or r.get("risk"),
-    }
+            "entry": r.get("entry") or r.get("price") or r.get("entry_price"),
+            "entry_ref": r.get("entry_ref"),
+            "sl": r.get("sl") or r.get("stop_loss") or r.get("stoploss"),
+            "tps": (r.get("tps") or r.get("tp_list")
+                    or ([r.get("tp")] if isinstance(r.get("tp"), (int, float)) else None)),
+            "source": r.get("source") or r.get("channel"),
+            "confidence": r.get("confidence"),
+            "new_sl": r.get("new_sl"),
+            "new_tps_csv": r.get("new_tps_csv"),
+            "tp_slot": r.get("tp_slot"),
+            "tp_to": r.get("tp_to"),
+            "risk_percent": r.get("risk_percent") or r.get("risk"),
+
+            # pass through enriched fields for CLOSE rows
+            "pnl": r.get("pnl") or r.get("profit") or r.get("profit_usd"),
+            "result": r.get("result"),  # "WIN" | "LOSS" | "BREAKEVEN"
+            
+            # (optional) keep join keys if present; helps future correlations
+            "gid": r.get("gid"),
+            "oid": r.get("oid"),
+            "id": r.get("id"),
+            "ticket": r.get("ticket"),
+            "order_id": r.get("order_id"),
+        }
 
     items = [norm(x) for x in raw]
-    # ensure newest first (some tails already return newest-first; we sort anyway)
     items.sort(key=lambda x: x.get("t") or 0, reverse=True)
     return {"items": items}
 
