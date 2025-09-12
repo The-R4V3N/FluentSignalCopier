@@ -7,8 +7,8 @@ export type Metrics = {
     state: { running: boolean; paused: boolean; quality: number };
     open_positions: number;
     pnl_30d: number;
-    pnl: number;      // alias
-    pnl30: number;    // alias
+    pnl: number;
+    pnl30: number;
     win_rate_30d?: number;
 };
 
@@ -78,6 +78,13 @@ export interface Signal {
     profit?: number | null;
 }
 
+export type State = {
+    running: boolean;
+    paused: boolean;
+    quality: number; // 0..100
+    heartbeat?: "ok" | "stale" | "dead";
+};
+
 // Prefer the page origin; fall back to env if provided.
 const ORIGIN = (import.meta as any)?.env?.VITE_API_BASE?.trim() || window.location.origin;
 const API = ORIGIN.replace(/\/$/, "");
@@ -110,6 +117,8 @@ export const api = {
     getPositions: () => get<any[]>("/api/positions"),
     getSettings: () => get<any>("/api/settings"),
     saveSettings: (s: any) => post<any>("/api/settings", s),
+    // Controls state's
+    getState: () => get<State>("/api/state"),
     start: () => post<any>("/api/start"),
     stop: () => post<any>("/api/stop"),
     pause: (paused: boolean) => post<any>("/api/pause", { paused }),

@@ -5,27 +5,20 @@ import ChannelPerformance from "../components/ChannelPerformance";
 import StatCard from "../components/StatCard";
 import ControlsBar from "../components/ControlsBar";
 import RecentSignalsTable, { type Rec as SignalRec } from "../components/RecentSignalsTable";
-import {useWebSocketFeed} from "../hooks/useWebSocketFeed";
+import { useWebSocketFeed } from "../hooks/useWebSocketFeed";
 
 function formatPnl(n: number | null | undefined) {
     if (typeof n !== "number" || !isFinite(n)) return "—";
     const sign = n >= 0 ? "+" : "−";
-    const abs = Math.abs(n).toLocaleString(undefined, {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
+    const abs = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return `${sign}$${abs}`;
 }
 
-// Normalize any backend/WS record into the table's SignalRec shape
 function normalizeRec(r: any): SignalRec | null {
     if (!r) return null;
-
-    // If WS callback ever forwards a string, try to parse it
     if (typeof r === "string") {
         try { r = JSON.parse(r); } catch { return null; }
     }
-
     const rec: SignalRec = {
         t: r.t ?? r.time ?? r.timestamp ?? null,
         action: r.action,
@@ -47,8 +40,9 @@ function normalizeRec(r: any): SignalRec | null {
     return rec;
 }
 
+const ALLOW = new Set(["OPEN", "MODIFY", "MODIFY_TP", "EMERGENCY_CLOSE_ALL"]);
+
 export default function Dashboard() {
-    const [paused, setPaused] = useState(false);
     const [metrics, setMetrics] = useState<Metrics | null>(null);
     const [positions, setPositions] = useState<any[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -72,56 +66,44 @@ export default function Dashboard() {
                 if (!alive) return;
                 setMetrics(m);
                 setPositions(Array.isArray(p) ? p : []);
-                setPaused(Boolean(m?.state?.paused));
                 setError(null);
             } catch (e: any) {
                 if (!alive) return;
                 setError(e?.message || "Failed to load data");
             }
         };
-
         load();
         const id = setInterval(load, 2000);
         return () => { alive = false; clearInterval(id); };
     }, []);
 
-    // Initial hydration for Recent Signals (so it's not empty until the first WS event)
+    // prefill "Recent Signals" from history so it isn’t empty before WS events
     useEffect(() => {
         let alive = true;
         (async () => {
             try {
                 const res = await fetch("/api/history?limit=50");
-                if (res.ok) {
-                    const data = await res.json();
-                    const raw: any[] = Array.isArray(data)
-                        ? data
-                        : (data?.items ?? data?.rows ?? data?.data ?? []);
-                    const mapped = raw.map(normalizeRec).filter(Boolean) as SignalRec[];
-
-                    const ALLOW = new Set(["OPEN", "MODIFY", "MODIFY_TP", "EMERGENCY_CLOSE_ALL"]);
-                    const filtered = mapped.filter(r => ALLOW.has((r.action || "").toUpperCase()));
-
-                    const deduped = (() => {
-                        const seen = new Set<string>();
-                        const out: SignalRec[] = [];
-                        for (const r of filtered) {
-                            const k = `${r.action}|${r.symbol}|${r.t}|${r.entry_ref ?? ""}`;
-                            if (seen.has(k)) continue;
-                            seen.add(k);
-                            out.push(r);
-                        }
-                        return out;
-                    })();
-
-                    const top3 = deduped
-                        .sort((a, b) => (b?.t ?? 0) - (a?.t ?? 0))
-                        .slice(0, 3);
-
-                    if (!alive) return;
-                    setRecentSignals(top3);
-                }
+                if (!res.ok) return;
+                const data = await res.json();
+                const raw: any[] = Array.isArray(data) ? data : (data?.items ?? data?.rows ?? data?.data ?? []);
+                const mapped = raw.map(normalizeRec).filter(Boolean) as SignalRec[];
+                const filtered = mapped.filter(r => ALLOW.has((r.action || "").toUpperCase()));
+                const deduped = (() => {
+                    const seen = new Set<string>();
+                    const out: SignalRec[] = [];
+                    for (const r of filtered) {
+                        const k = `${r.action}|${r.symbol}|${r.t}|${r.entry_ref ?? ""}`;
+                        if (seen.has(k)) continue;
+                        seen.add(k);
+                        out.push(r);
+                    }
+                    return out;
+                })();
+                const top3 = deduped.sort((a, b) => (b?.t ?? 0) - (a?.t ?? 0)).slice(0, 3);
+                if (!alive) return;
+                setRecentSignals(top3);
             } catch {
-                // ignore – WS will populate
+                // ignore — WS will populate
             }
         })();
         return () => { alive = false; };
@@ -131,27 +113,17 @@ export default function Dashboard() {
     useWebSocketFeed((incoming: any) => {
         const rec = normalizeRec(incoming);
         if (!rec) return;
-
-        const ALLOW = new Set(["OPEN", "MODIFY", "MODIFY_TP", "EMERGENCY_CLOSE_ALL"]);
         if (!ALLOW.has((rec.action || "").toUpperCase())) return;
 
         const keyNew = `${rec.action}|${rec.symbol}|${rec.t}|${rec.entry_ref ?? ""}`;
         setRecentSignals(prev => {
-            // Remove any existing duplicate
-            const filtered = prev.filter(r =>
-                `${r.action}|${r.symbol}|${r.t}|${r.entry_ref ?? ""}` !== keyNew
-            );
-            // Insert newest and keep only 3
-            const next = [rec, ...filtered]
-                .sort((a, b) => (b?.t ?? 0) - (a?.t ?? 0))
-                .slice(0, 3);
-            return next;
+            const filtered = prev.filter(r => `${r.action}|${r.symbol}|${r.t}|${r.entry_ref ?? ""}` !== keyNew);
+            return [rec, ...filtered].sort((a, b) => (b?.t ?? 0) - (a?.t ?? 0)).slice(0, 3);
         });
     });
 
     const openPositions = positions.length;
     const pnl30 = metrics?.pnl_30d ?? null;
-    const quality = metrics?.state?.quality ?? 60;
 
     return (
         <>
@@ -159,23 +131,16 @@ export default function Dashboard() {
             <section className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                 <StatCard
                     title="Active Channels"
-                    value={
-                        chanSummary?.totals?.channels != null ? String(chanSummary.totals.channels) : "—"
-                    }
+                    value={chanSummary?.totals?.channels != null ? String(chanSummary.totals.channels) : "—"}
                 />
                 <StatCard
                     title="Win Rate (overall)"
-                    value={
-                        chanSummary?.overallWinRate != null
-                            ? `${chanSummary.overallWinRate.toFixed(1)}%`
-                            : "—"
-                    }
+                    value={chanSummary?.overallWinRate != null ? `${chanSummary.overallWinRate.toFixed(1)}%` : "—"}
                 />
                 <StatCard title="PnL (30d)" value={formatPnl(pnl30)} />
                 <StatCard title="Open Positions" value={openPositions} />
             </section>
 
-            {/* Optional error banner */}
             {error && (
                 <div className="mt-3 text-sm" style={{ color: "var(--signal-sell)" }}>
                     {error}
@@ -184,34 +149,7 @@ export default function Dashboard() {
 
             {/* Controls */}
             <div className="md:mt-4 h-16" aria-hidden />
-            <ControlsBar
-                paused={paused}
-                onStart={async () => {
-                    try {
-                        await api.start();
-                        setPaused(false);
-                    } catch { }
-                }}
-                onStop={async () => {
-                    try {
-                        await api.stop();
-                        setPaused(true);
-                    } catch { }
-                }}
-                onTogglePause={async () => {
-                    const next = !paused;
-                    try {
-                        await api.pause(next);
-                        setPaused(next);
-                    } catch { }
-                }}
-                qualityDefault={quality}
-                onQualityChange={async (val: number) => {
-                    try {
-                        await api.setQuality(val);
-                    } catch { }
-                }}
-            />
+            <ControlsBar />
 
             {/* Recent Signals – last 3 + link to full history */}
             <section className="mt-6 w-full max-w-5xl mx-auto">
@@ -220,10 +158,7 @@ export default function Dashboard() {
                         <div className="font-medium">
                             Recent Signals <span className="muted">(last 3)</span>
                         </div>
-                        <Link
-                            to="/history"
-                            className="text-sm font-medium underline underline-offset-4 hover:opacity-80"
-                        >
+                        <Link to="/history" className="text-sm font-medium underline underline-offset-4 hover:opacity-80">
                             View full history
                         </Link>
                     </div>
