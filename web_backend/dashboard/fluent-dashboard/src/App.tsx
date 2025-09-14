@@ -1,4 +1,9 @@
 // src/App.tsx
+
+// Licensed under the Fluent Signal Copier Limited Use License v1.0
+// See LICENSE.txt for terms. No warranty; use at your own risk.
+// Copyright (c) 2025 R4V3N. All rights reserved.
+
 import { Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { useEffect,  useState } from "react";
 import Sidebar from "./components/Sidebar";
