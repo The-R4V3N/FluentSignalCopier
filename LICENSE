@@ -1,1 +1,128 @@
-git commit -m "Replace MIT license with Fluent Signal Copier License v1.2"
+# Fluent Signal Copier Limited Use License v1.0
+
+Copyright (c) 2025 R4V3N. All rights reserved.
+Effective date: 2025-09-14
+
+## Definitions
+
+“Licensor” means R4V3N.
+“Software” means the Fluent Signal Copier codebase and all associated files, including without limitation Python scripts, MQL5 Expert or Indicator files, TypeScript or React frontend, compiled artifacts, configuration, documentation, and any updates or patches provided by Licensor.
+“User” means the individual or legal entity that downloads, installs, or uses the Software.
+“Seat” means one named natural person authorized to use the Software.
+“Device” means a single physical or virtual machine instance.
+“MT5 Account” means one MetaTrader 5 trading account.
+“Update” means any bug fix, patch, enhancement, or new version of the Software provided by Licensor.
+
+1. Acceptance
+
+By installing, copying, or using the Software, User accepts this License. If User does not agree, do not install or use the Software.
+
+2. Grant of License
+
+Subject to continuous compliance with this License, Licensor grants User a limited, non-exclusive, non-transferable, revocable license to install and use the Software for personal or internal business purposes. Unless a separate written agreement says otherwise, the license is limited to:
+a. up to one Seat;
+b. one production MT5 Account and one demo MT5 Account;
+c. use on up to two Devices used by that Seat, active on no more than two Devices in any rolling 24-hour window.
+User may make a reasonable number of machine-generated copies solely for installation, backup, and archival purposes. All rights not expressly granted are reserved by Licensor.
+
+3. Restrictions
+
+User may not:
+a. modify, adapt, translate, port, merge, or create derivative works of the Software;
+b. remove or alter proprietary notices or technological measures;
+c. publish, distribute, sublicense, sell, rent, lease, lend, host, provide as a managed service, or otherwise make the Software available to third parties, including “signal copier as a service”;
+d. use the Software to operate trading for third parties except with Licensor’s prior written consent;
+e. use outputs, heuristics, logs, or performance data to build, train, or fine-tune any model or competing product;
+f. benchmark or publish comparative results without prior written consent.
+
+4. Reverse Engineering
+
+User shall not reverse engineer, decompile, or disassemble the Software, or attempt to derive source code or underlying ideas of any compiled components, obfuscated assets, or build artifacts, except to the minimum extent permitted by mandatory law for interoperability and only after providing prior written notice to Licensor and giving Licensor a reasonable opportunity to provide the necessary information.
+
+5. Output and Data Use
+
+User may use trading results and logs for personal or internal business analysis. User may not extract, repackage, resell, or redistribute signals or processing pipelines derived primarily from the Software, nor use outputs to train any machine learning or statistical model.
+
+6. Security, Trading, and Regulatory Disclaimer
+
+The Software interacts with third-party platforms and networks, including Telegram and MetaTrader 5. Automated trading involves substantial risk and may result in financial loss. The Software provides no investment advice and offers no performance guarantees. User alone is responsible for configuration, risk limits, demo testing, broker compatibility, compliance with financial services rules, data protection, and third-party platform terms.
+
+7. Support
+
+Unless Licensor agrees otherwise in writing, the Software is provided without support, service level commitments, or maintenance obligations.
+
+8. No Warranty
+
+THE SOFTWARE IS PROVIDED “AS IS” AND “AS AVAILABLE,” WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL BE ERROR-FREE, SECURE, OR UNINTERRUPTED, OR THAT DEFECTS WILL BE CORRECTED.
+
+9. Indemnity
+
+User shall defend, indemnify, and hold harmless Licensor and its contributors from and against any claims, losses, liabilities, damages, costs, and expenses arising out of or related to User’s use of the Software, including violations of law, third-party terms, or this License.
+
+10. Limitation of Liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, LICENSOR AND ITS CONTRIBUTORS SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, TRADING LOSSES, DATA LOSS, BUSINESS INTERRUPTION, OR COSTS OF SUBSTITUTE GOODS OR SERVICES, ARISING FROM OR RELATING TO THIS LICENSE OR USE OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES. DIRECT DAMAGES, IF ANY, ARE LIMITED TO THE AMOUNT ACTUALLY PAID BY USER TO LICENSOR FOR THE SOFTWARE, IF ANY.
+
+11. Compliance with Laws, Export, and Sanctions
+
+User is solely responsible for compliance with all applicable laws and regulations, including financial services rules, data protection, and export controls. User represents that it is not subject to sanctions and will not export, re-export, or transfer the Software in violation of applicable export or sanctions laws.
+
+12. Confidentiality
+
+The Software, its algorithms, and non-public documentation are Licensor’s confidential information. User shall not disclose them to third parties. Confidentiality does not apply to information that is publicly available without breach, rightfully received from a third party without duty of confidentiality, or independently developed without use of Licensor’s confidential information. Open source components remain governed by their own licenses.
+
+13. Ownership and Trademarks
+
+The Software is licensed, not sold. Licensor and its contributors retain all right, title, and interest in and to the Software and all intellectual property rights. Nothing in this License grants any rights to use Licensor’s names, logos, or trademarks.
+
+14. Audit and Attestation
+
+Upon thirty days written notice, Licensor may request a written attestation that User’s deployment complies with Sections 2 through 5 and 11. User shall provide the attestation within fifteen days. Licensor may request reasonable technical information limited to verifying seat, device, and account limits. Licensor may conduct such requests no more than once per calendar year unless a material breach is suspected. Failure to provide a truthful attestation is a material breach.
+
+15. Updates, Licensing Mechanisms, and Telemetry
+
+a. Updates. Licensor may, but is not obligated to, provide Updates under this License unless accompanied by new terms.
+b. Licensing Mechanisms. Updates may include license keys or usage checks. Licensor will provide thirty days notice before material changes to usage restrictions take effect. Continued use after the notice period constitutes acceptance.
+c. Telemetry. The Software may include optional telemetry used solely to improve reliability and enforce license limits. Telemetry will not include trading credentials, personally identifying message content, or proprietary trading strategies. User may disable non-essential telemetry through settings, except components required to enforce license limits. Telemetry, if any, will be documented.
+
+16. Third-Party Components
+
+Third-party libraries included with the Software remain licensed under their respective terms. Nothing in this License restricts rights granted by those licenses. A list of third-party notices may be included as THIRD_PARTY_NOTICES.txt.
+
+17. Assignment
+
+User may not assign, transfer, or sublicense this License, by operation of law or otherwise, without Licensor’s prior written consent. Any attempted assignment in violation of this Section is void.
+
+18. Injunctive Relief
+
+User acknowledges that unauthorized use, copying, distribution, or disclosure may cause irreparable harm to Licensor for which monetary damages would be inadequate. Licensor is entitled to seek injunctive or equitable relief without posting bond.
+
+19. Term and Termination
+
+This License is effective until terminated.
+Immediate Termination. Licensor may terminate immediately upon written notice if User breaches Sections 3 through 5, 12, 15, 17, or 18, fails to pay required fees if applicable, or becomes insolvent or subject to bankruptcy proceedings.
+Cure Period. For breaches of other sections, User has ten days after written notice to cure.
+Upon termination, User must cease use and destroy all copies within five days and, upon request, certify destruction. Sections 3 through 5 and 7 through 20 survive termination.
+
+20. Governing Law, Venue, and Dispute Resolution
+
+This License is governed by the laws of Sweden, without regard to conflict-of-laws rules. The exclusive venue is the courts located in Stockholm, Sweden, and the parties consent to personal jurisdiction there. Before initiating court proceedings, the parties will attempt good-faith mediation through the Stockholm Chamber of Commerce Mediation rules. Costs are shared equally unless otherwise agreed.
+
+21. Notices
+
+Notices under this License must be in writing and are deemed given when sent to the contact details provided by the other party or posted with the Software if directed to Users generally.
+
+22. Entire Agreement, Severability, and No Waiver
+
+This License is the entire agreement regarding the Software and supersedes prior or contemporaneous understandings. Any waiver or modification must be in writing and signed by Licensor. If any provision is found unenforceable, it will be modified to the minimum extent necessary to be enforceable while preserving its intent, and the remainder will remain in effect. Failure to enforce any provision is not a waiver of future enforcement.
+
+## Appendix A. Applying this License
+
+Licensed under the Fluent Signal Copier Limited Use License v1.0.
+You may not use this file except in compliance with the License.
+A copy of the License should be included with this distribution as LICENSE.txt.
+
+Unless required by applicable law or agreed to in writing, software is
+distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+
+Copyright (c) 2025 R4V3N. All rights reserved.
