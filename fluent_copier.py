@@ -9,6 +9,10 @@
 #  --collect-all qfluentwidgets `
 #  .\fluent_copier.py
 
+# Licensed under the Fluent Signal Copier Limited Use License v1.0
+# See LICENSE.txt for terms. No warranty; use at your own risk.
+# Copyright (c) 2025 R4V3N. All rights reserved.
+
 import os, re, sys, json, time, asyncio
 from dataclasses import dataclass, asdict
 from pathlib import Path

@@ -1,3 +1,7 @@
+# Licensed under the Fluent Signal Copier Limited Use License v1.0
+# See LICENSE.txt for terms. No warranty; use at your own risk.
+# Copyright (c) 2025 R4V3N. All rights reserved.
+
 # telegram_bridge.py — Telegram → MT5 bridge (robust parser + global counter)
 # Python 3.11+.  pip install telethon python-dotenv
 import asyncio, json, time, re, os, sys
