@@ -23,6 +23,8 @@
 
 🛠️ [Troubleshooting](#%EF%B8%8F-troubleshooting)
 
+👨‍💻 [Development](#-development)
+
 ❓ [FAQ](#-frequently-asked-questions)
 
 ---
@@ -212,6 +214,70 @@ Low-latency execution (tested under 200ms in local setups)
 | Wrong trades closed | Verify close-by-OID is enabled in the GUI settings |
 
 ---
+
+## 👨‍💻 Development
+
+### Branch Protection & Workflow
+
+This repository uses a protected master branch workflow to ensure code quality:
+
+### Branch Structure
+
+- master → Protected release branch (stable code only)
+- dev → Main development branch (latest working code)
+- feature/* → Feature development branches
+
+### Development Workflow
+
+1. Clone and setup development environment:
+
+   ```bash
+   git clone https://github.com/The-R4V3N/FluentSignalCopier.git
+   cd FluentSignalCopier
+   ./scripts/install-hooks.sh  # Install pre-push protection
+   ```
+
+2. Create a new feature branch from dev:
+
+   ```bash
+   git checkout dev
+   git pull origin dev
+   git checkout -b feature/your-feature-name
+   ```
+
+3. Development and testing:
+
+   ```bash
+   # Make your changes
+   git add .
+   git commit -m "feat: your feature description"
+   git push origin feature/your-feature-name
+   ```
+
+4. Open a Pull Request (PR) to merge your feature branch into dev.
+
+- Create PR from feature/your-feature-name → dev
+- After review and testing, merge to dev
+- For releases: Create PR from dev → master
+
+### Protection Features
+
+- ✅ GitHub Actions prevent direct pushes to master
+- ✅ Local pre-push hooks block accidental pushes
+- ✅ dev branch set as default for new clones
+- ✅ Automated branch protection via CI/CD
+
+### Setting Up Local Protection
+
+1. Install pre-push hooks:
+
+   ```bash
+   # Install the pre-push hook (prevents direct master pushes)
+    chmod +x scripts/install-hooks.sh
+    ./scripts/install-hooks.sh
+   ```
+
+This ensures that all changes go through proper review and the master branch remains stable for production releases.
 
 ## ❓ Frequently Asked Questions
 

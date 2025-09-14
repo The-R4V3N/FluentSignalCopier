@@ -1,0 +1,15 @@
+name: Protect Master
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  check-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block direct pushes to master
+        if: github.ref == 'refs/heads/master' && !contains(github.event.head_commit.message, 'Merge')
+        run: |
+          echo "❌ Direct pushes to master not allowed!"
+          echo "Please use pull requests from dev branch"
+          exit 1
