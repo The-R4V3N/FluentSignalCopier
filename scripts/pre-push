@@ -1,0 +1,14 @@
+#!/bin/bash
+protected_branch='master'
+current_branch=$(git symbolic-ref HEAD | sed -e 's,.*/\(.*\),\1,')
+
+if [ $protected_branch = $current_branch ]; then
+    echo "❌ Direct pushes to master branch are not allowed!"
+    echo "📋 Workflow:"
+    echo "  1. Push to dev: git push origin dev"
+    echo "  2. Create feature branch: git checkout -b feature/name"
+    echo "  3. Merge via PR: dev → master"
+    exit 1
+fi
+
+echo "✅ Push to $current_branch allowed"
