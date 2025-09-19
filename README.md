@@ -395,4 +395,4 @@ Always test on demo accounts first and never risk more than you can afford to lo
 
 ## 📜 License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [Fluent Signal Copier License](LICENSE).
