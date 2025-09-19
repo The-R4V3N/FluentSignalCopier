@@ -358,6 +358,7 @@ graph TD
 - FastAPI backend with metrics, auto-detection, and health monitoring
 - Terminal monitoring dashboard with uptime/error counters
 - Centralized structured logging with rotation and real-time streaming
+- Automatic Break-Even (BE) move: When TP1 is hit (if be_on_tp is set in the signal), the EA automatically moves the stop loss to entry price. This ensures trades are protected without manual intervention.
 
 ---
 
@@ -369,6 +370,7 @@ graph TD
 |------------------|-------|----------|------------|
 | **Signal Parsing** | ✅ Standard formats | ✅ Heuristic confidence scoring | ✅ Planned ML/Custom training |
 | **Risk Management** | ✅ % based | ✅ Multi-layer + per-symbol | ✅ Portfolio-level optimization |
+| **Risk-aware** | ✅ Lot caps | ✅ % risk, dollar caps, per-instrument safety | ✅ Break-Even SL when TP1 is reached |
 | **Interfaces** | ✅ Desktop GUI | ✅ Web Dashboard + Mobile | ✅ API + Custom integrations |
 | **Monitoring** | ✅ Basic logs | ✅ Real-time analytics | ✅ Advanced reporting + alerts |
 | **Channels** | ✅ Up to 5 | ✅ Unlimited | ✅ Unlimited + performance ranking |
