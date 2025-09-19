@@ -213,15 +213,32 @@ ALIASES = {
     "BRENT": "XBRUSD", "UKOIL": "XBRUSD", "XBRUSD": "XBRUSD",
 }
 
-def normalize_symbol(s: str) -> str:
-    s = (s or "").strip().upper()
-    return ALIASES.get(s, s)
+# Broker-specific forced suffix when signals omit it
+BROKER_FORCED_SUFFIX = {
+    "XAUUSD": "+",   # make bare XAUUSD become XAUUSD+
+    # add more if needed, e.g. "XAGUSD": "m"
+}
 
-# Regex patterns for parsing
-SYM_RE = re.compile(
-    r'(?:#)?\b([A-Z]{6}|[A-Z]{2,5}\d{2,3}|XAU|XAUSD|GOLD|SILVER|XAG|USOIL|WTI|OIL|XTIUSD|UKOIL|BRENT|XBRUSD|SPX500|SP500|US500|USTEC|US30|DJ30)\b',
-    re.I
+# Core symbols/aliases we understand before suffixes
+CORE_SYM = (
+    r'(?:'
+    r'[A-Z]{6}'              # EURUSD, XAUUSD, etc.
+    r'|[A-Z]{2,5}\d{2,3}'    # GER40, US500, NAS100, etc.
+    r'|XAU|XAUSD|GOLD|SILVER|XAG'
+    r'|USOIL|WTI|OIL|XTIUSD|UKOIL|BRENT|XBRUSD'
+    r'|SPX500|SP500|US500|USTEC|US30|DJ30'
+    r')'
 )
+
+# Suffix could be ".r", "-ecn", "_pro", "+", or bare trailing letters like "m"
+BROKER_SUFFIX = r'(?:[.\-_][A-Za-z0-9]{1,10}|\+|[A-Za-z]{1,7})'
+
+# Use lookarounds, not \b, so trailing '+' / '.' are kept
+SYM_TOKEN = rf'(?<!\w)({CORE_SYM}(?:{BROKER_SUFFIX})?)(?=$|\s|[^\w])'
+SYM_RE = re.compile(SYM_TOKEN, re.I)
+
+# For splitting inside normalize_symbol
+_SPLIT_SYM = re.compile(rf'^({CORE_SYM})({BROKER_SUFFIX})?$', re.I)
 
 # Accept 1) plain numbers  2) numbers with grouped thousands (space, NBSP, narrow NBSP, figure space, comma, apostrophe)
 NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?"
@@ -241,14 +258,14 @@ TP_RE = re.compile(
 
 # Order type patterns
 HEADER_PENDING_FULL_RE = re.compile(
-    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>' + NUM_TOKEN + r')\b',
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    rf'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>{NUM_TOKEN})\b',
     re.I | re.M
 )
 
 HEADER_INLINE_PRICE_RE = re.compile(
-    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+@?\s*(?P<price>' + NUM_TOKEN + r')\b',
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    rf'(?P<side>BUY|SELL)\s+@?\s*(?P<price>{NUM_TOKEN})\b',
     re.I | re.M
 )
 
@@ -278,6 +295,33 @@ _FRACTIONAL_RISK_WORDS = {
     "third": 1/3, "⅓": 1/3,
     "two thirds": 2/3, "⅔": 2/3,
 }
+
+def apply_forced_suffix(sym: str) -> str:
+    """
+    If a symbol matches a base in BROKER_FORCED_SUFFIX and has no broker suffix,
+    append the broker's required suffix. If it already has any suffix, leave it.
+    """
+    s = (sym or "").strip().upper()
+    if not s:
+        return s
+
+    # treat these as suffix indicators
+    suffix_starters = {"+", ".", "-", "_"}
+
+    for base, suff in BROKER_FORCED_SUFFIX.items():
+        if s == base:
+            return base + suff
+        # If something like XAUUSDm or XAUUSD.cash is already there, keep it.
+        if s.startswith(base) and len(s) > len(base) and s[len(base)] in suffix_starters:
+            return s
+    return s
+
+def normalize_symbol(s: str) -> str:
+    s = (s or "").strip().upper()
+    # first map aliases (GOLD -> XAUUSD, etc.)
+    core = ALIASES.get(s, s)
+    # then force the broker suffix if the core has none
+    return apply_forced_suffix(core)
 
 def _try_sl(text: str) -> Optional[float]:
     m = SL_RES.search(text)
