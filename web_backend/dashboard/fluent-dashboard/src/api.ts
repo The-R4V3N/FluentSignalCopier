@@ -117,17 +117,24 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 export const api = {
-    getMetrics: () => get<Metrics>("/api/metrics"),
-    getPaths: () => get<Paths>("/api/paths"),
-    getSignals: (limit = 200) => get<Signal[]>(`/api/signals?limit=${limit}`),
-    getPositions: () => get<any[]>("/api/positions"),
-    getSettings: () => get<any>("/api/settings"),
-    saveSettings: (s: any) => post<any>("/api/settings", s),
-    // Controls state's
-    getState: () => get<State>("/api/state"),
-    start: () => post<any>("/api/start"),
-    stop: () => post<any>("/api/stop"),
-    pause: (paused: boolean) => post<any>("/api/pause", { paused }),
-    setQuality: (threshold: number) => post<any>("/api/set-quality", { threshold }),
-    emergencyCloseAll: () => post<any>("/api/emergency-close-all"),
+  getMetrics: () => get<Metrics>("/api/metrics"),
+  getPaths: () => get<Paths>("/api/paths"),
+  getSignals: (limit = 200) => get<Signal[]>(`/api/signals?limit=${limit}`),
+  getPositions: () => get<any[]>("/api/positions"),
+
+  // App (bridge) settings
+  getSettings: () => get<any>("/api/settings"),
+  saveSettings: (s: any) => post<any>("/api/settings", s),
+
+  // Controls / state
+  getState: () => get<State>("/api/state"),
+  start: () => post<any>("/api/start"),
+  stop: () => post<any>("/api/stop"),
+  pause: (paused: boolean) => post<any>("/api/pause", { paused }),
+  setQuality: (threshold: number) => post<any>("/api/set-quality", { threshold }),
+  emergencyCloseAll: () => post<any>("/api/emergency-close-all"),
+
+  // EA parameters (single, correct definitions)
+  getEaSettings: () => get<any>("/api/ea-settings"),
+  saveEaSettings: (payload: any) => post<any>("/api/ea-settings", payload),
 };
