@@ -8,7 +8,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional
 
 from pathlib import Path
 from datetime import datetime
@@ -1266,6 +1267,158 @@ def api_history(limit: int = 100):
     items.sort(key=lambda x: x.get("t") or 0, reverse=True)
     return {"items": items}
 
+#------------------------------------------------------------------------------
+# EA Settings JSON (read/write)
+#------------------------------------------------------------------------------
+EA_SETTINGS = (base / "Fluent_ea_settings.json").resolve()
+
+class EaSettings(BaseModel):
+    # ===== FILE CONFIGURATION =====
+    InpDebug: bool = False
+    InpSignalFileName: str = "Fluent_signals.jsonl"
+    InpHeartbeatFileName: str = "Fluent_heartbeat.txt"
+    InpPositionsFileName: str = "Fluent_positions.json"
+
+    # ===== BRAKE EVEN =====
+    InpBE_Enable: bool = True
+    InpBE_TriggerTP: int = 1
+    InpBE_AutoOnTP1: bool = True
+    InpBE_Logging: bool = True
+    InpBE_CleanupEveryMin: int = 60
+    InpBE_OffsetPoints: int = 0
+
+    # ===== SYMBOL CONFIGURATION =====
+    InpSymbolPrefix: str = ""
+    InpSymbolSuffix: str = ""
+    InpSymbolSuffixVariants: str = ""
+
+    # ===== TRADING PARAMETERS =====
+    InpDefaultLots: float = 0.01
+    InpRiskPercent: float = 1.0
+    InpMagic: int = 20250810
+    InpSlippagePoints: int = 50
+    InpAllowBuys: bool = True
+    InpAllowSells: bool = True
+    InpCloseConflicts: bool = False
+
+    # ===== HEARTBEAT CONFIGURATION =====
+    InpEnableHeartbeat: bool = True
+    HeartbeatSeconds: int = 5
+    InpHeartbeatTimeout: int = 60
+    InpSnapshotOnlyMagic: bool = False
+
+    # ===== MULTI-POSITION MANAGEMENT =====
+    InpMaxPositions: int = 5
+    InpSkipBadTPs: bool = True
+    InpPositionsToOpen: int = 0
+    InpRiskPerLeg: bool = False
+    InpUseCustomLots: bool = False
+    InpTP1_Lots: float = 0.02
+    InpTP2_Lots: float = 0.01
+    InpTP3_Lots: float = 0.01
+    InpTP4_Lots: float = 0.01
+    InpTP5_Lots: float = 0.01
+
+    # ===== SAFETY CAPS =====
+    InpMaxLotOverall: float = 0.05
+    InpMaxLot_Metal: float = 0.05
+    InpMaxLot_Oil: float = 0.05
+    InpMaxLot_Index: float = 0.05
+    InpMaxLot_FX: float = 0.05
+    InpMaxLot_Crypto: float = 0.05
+    InpRiskDollarCap: float = 15.0
+
+    # ===== SYSTEM FEATURES =====
+    InpWriteSnapshots: bool = True
+    InpSoundAlerts: bool = True
+    InpSourceTags: bool = True
+
+    # ===== ALERT CONFIGURATION =====
+    InpAlertOnOpen: bool = True
+    InpAlertOnClose: bool = True
+    InpAlertOnEmergency: bool = True
+    InpAlertOnModify: bool = False
+
+    # ===== HEARTBEAT WARNING CONTROL =====
+    InpHeartbeatPopupAlerts: bool = False
+    InpHeartbeatPrintWarnings: bool = True
+    InpHeartbeatWarnInterval: int = 300
+
+    # ===== TIME MANAGEMENT =====
+    InpTimeFilter: bool = True
+    InpStartTimeHHMM: str = "01:00"
+    InpEndTimeHHMM: str = "23:59"
+    InpTradeMonday: bool = True
+    InpTradeTuesday: bool = True
+    InpTradeWednesday: bool = True
+    InpTradeThursday: bool = True
+    InpTradeFriday: bool = True
+    InpTradeSaturday: bool = False
+    InpTradeSunday: bool = False
+
+    @field_validator("InpStartTimeHHMM", "InpEndTimeHHMM", mode="before")
+    def _hhmm(cls, v):
+        s = str(v or "")
+        parts = s.split(":")
+        if len(parts) != 2:
+            return "00:00"
+        try:
+            hh = f"{int(parts[0]) % 24:02d}"
+            mm = f"{int(parts[1]) % 60:02d}"
+            return f"{hh}:{mm}"
+        except Exception:
+            return "00:00"
+
+def _load_ea_settings() -> EaSettings:
+    try:
+        if EA_SETTINGS.exists():
+            raw = _read_text_multi(EA_SETTINGS)
+            data = json.loads(raw)
+            return EaSettings(**data)
+    except Exception as e:
+        print(f"[EA Settings] Load error: {e}")
+    return EaSettings()
+
+def _save_ea_settings(obj: EaSettings) -> None:
+    try:
+        EA_SETTINGS.parent.mkdir(parents=True, exist_ok=True)
+        data = obj.model_dump()
+        EA_SETTINGS.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        print(f"[EA Settings] Saved to {EA_SETTINGS}")
+    except Exception as e:
+        print(f"[EA Settings] Save error: {e}")
+        raise
+
+@app.get("/api/ea-settings")
+def get_ea_settings():
+    """Load EA settings from Fluent_ea_settings.json"""
+    try:
+        settings = _load_ea_settings()
+        return JSONResponse(settings.model_dump())
+    except Exception as e:
+        return JSONResponse(
+            {"error": f"Failed to load EA settings: {str(e)}"}, 
+            status_code=500
+        )
+
+@app.post("/api/ea-settings")
+def set_ea_settings(settings: EaSettings):
+    """Save EA settings to Fluent_ea_settings.json"""
+    try:
+        # Validate and save
+        _save_ea_settings(settings)
+        
+        # Return success with the saved settings
+        return JSONResponse({
+            "ok": True, 
+            "saved": settings.model_dump(),
+            "path": str(EA_SETTINGS)
+        })
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "error": f"Failed to save EA settings: {str(e)}"}, 
+            status_code=500
+        )
 # -----------------------------------------------------------------------------
 # Static SPA (serve built React dashboard from /app)
 # -----------------------------------------------------------------------------

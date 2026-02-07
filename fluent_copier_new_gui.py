@@ -215,6 +215,14 @@ ALIASES = {
     "JP225": "JP225", "NIKKEI": "JP225",
     "USOIL": "XTIUSD", "WTI": "XTIUSD", "OIL": "XTIUSD", "XTIUSD": "XTIUSD",
     "BRENT": "XBRUSD", "UKOIL": "XBRUSD", "XBRUSD": "XBRUSD",
+
+    # Your broker’s dotted crypto symbols:
+    "BTCUSD": "BTCUSD", "BTC": "BTCUSD",
+    "ETHUSD": "ETHUSD", "ETH": "ETHUSD",
+    "SOLUSD": "SOLUSD", "SOL": "SOLUSD",
+    "LTCUSD": "LTCUSD", "LTC": "LTCUSD",
+    "XRPUSD": "XRPUSD", "XRP": "XRPUSD",
+    # add more as needed
 }
 
 # Broker-specific forced suffix when signals omit it
@@ -247,7 +255,7 @@ _SPLIT_SYM = re.compile(rf'^({CORE_SYM})({BROKER_SUFFIX})?$', re.I)
 # Accept 1) plain numbers  2) numbers with grouped thousands (space, NBSP, narrow NBSP, figure space, comma, apostrophe)
 NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?"
 
-SIDE_RE = re.compile(r'\b(BUY|SELL)\b', re.I)
+SIDE_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\b', re.I)
 ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(' + NUM_TOKEN + r')\b', re.I)
 
 # Accepts: SL / S/L / STOPLOSS / STOP LOSS / STOPPLOSS with @, :, =, -, en/em dash
@@ -255,9 +263,9 @@ SL_RES = re.compile(
     r'(?im)\b(?:SL|S/L|STOPP?[\s\-]*LOSS)\b\s*(?:@|:|=|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
-# Accepts: TP, TP1, TP2 … with @, :, =, ->, -, en/em dash; works anywhere in the line
+# Accepts: TP, TP1, TP2 … with @, :, ;, =, ->, -, en/em dash; works anywhere in the line
 TP_RE = re.compile(
-    r'(?im)\bTP\d*\b\s*(?:@|:|=|->|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
+    r'(?im)\bTP\d*\b\s*(?:@|:|;|=|->|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
 # Order type patterns
@@ -267,14 +275,21 @@ HEADER_PENDING_FULL_RE = re.compile(
     re.I | re.M
 )
 
+HEADER_LONGSHORT_ENTRY_RE = re.compile(
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    r'(?P<side>LONG|SHORT)\s+ENTRY\s*\(\s*(?P<ptype>MARKET|LIMIT|STOP)\s*\)\s*'
+    r'[:@-]?\s*(?P<price>' + NUM_TOKEN + r')\b',
+    re.I | re.M
+)
+
 HEADER_INLINE_PRICE_RE = re.compile(
     rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
     rf'(?P<side>BUY|SELL)\s+@?\s*(?P<price>{NUM_TOKEN})\b',
     re.I | re.M
 )
 
-NOW_MARKET_RE = re.compile(r'\b(BUY|SELL)\s+(?:NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
-PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL)\s+(LIMIT|STOP)\b', re.I)
+NOW_MARKET_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\s+(?:NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
+PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\s+(LIMIT|STOP)\b', re.I)
 BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)
 RISK_PCT_RE = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
 CLOSE_ANY_RE = re.compile(
@@ -509,15 +524,26 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         ptype = m.group('ptype').upper()
         order_type = "LIMIT" if ptype == "LIMIT" else "STOP"
     else:
-        m2 = HEADER_INLINE_PRICE_RE.search(t)
-        if m2:
-            symbol = normalize_symbol(m2.group('sym'))
-            side = m2.group('side').upper()
-            entry = _num(m2.group('price'))
-
+        # New: "BTCUSD Long Entry (market|limit|stop): 116474"
+        mL = HEADER_LONGSHORT_ENTRY_RE.search(t)
+        if mL:
+            symbol = normalize_symbol(mL.group('sym'))
+            side = mL.group('side').upper()          # LONG/SHORT here
+            entry = _num(mL.group('price'))
+            ptype = (mL.group('ptype') or "").upper()
+            order_type = ("LIMIT" if ptype == "LIMIT"
+                          else "STOP" if ptype == "STOP"
+                          else "MARKET")
+        else:
+            m2 = HEADER_INLINE_PRICE_RE.search(t)
+            if m2:
+                symbol = normalize_symbol(m2.group('sym'))
+                side = m2.group('side').upper()
+                entry = _num(m2.group('price'))
+    
         # Check for order type overrides
-        if PENDING_PAIR_RE.search(t):
-            pm = PENDING_PAIR_RE.search(t)
+        pm = PENDING_PAIR_RE.search(t)
+        if pm and order_type == "MARKET":
             pside, ptyp = pm.group(1).upper(), pm.group(2).upper()
             side = side or pside
             order_type = "LIMIT" if ptyp == "LIMIT" else "STOP"
@@ -552,6 +578,10 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     # Risk parsing
     # risk = _parse_risk_percent(t) legacy code
     _risk = _parse_risk_fields(t)
+
+    # Normalize LONG/SHORT to BUY/SELL for downstream logic
+    if side in ("LONG", "SHORT"):
+        side = "BUY" if side == "LONG" else "SELL"
 
     # For MARKET orders, entry is reference only
     entry_ref = entry
@@ -2341,6 +2371,36 @@ class MainWindow(QWidget):
             self.dashboard.authEdit.clear()
         except Exception:
             pass
+
+      # --- Auth actions from Dashboard ---------------------------------
+    def _submitAuth(self):
+        """Called by DashboardPage when the user hits Submit in the auth box."""
+        try:
+            if not self.thread:
+                self.toast("Not running", "Start first.")
+                return
+
+            text = (self.dashboard.authEdit.text() or "").strip()
+            if not text:
+                self.toast("Missing", "Enter the code or password.")
+                return
+
+            mode = getattr(self, "_authMode", "code")
+            if mode == "code":
+                self.thread.set_auth_code(text)
+                self._appendLog("[AUTH] Code submitted")
+            else:
+                self.thread.set_auth_password(text)
+                self._appendLog("[AUTH] Password submitted")
+
+            self._hideAuthBox()
+        except Exception as e:
+            self._appendLog(f"[ERROR] auth submit: {e}")
+
+    def _cancelAuth(self):
+        """Hide the auth box without submitting anything."""
+        self._appendLog("[AUTH] Input canceled")
+        self._hideAuthBox()
         
     def closeEvent(self, event):
         try:
