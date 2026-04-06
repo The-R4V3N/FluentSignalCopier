@@ -4,7 +4,7 @@ name = "fluentsignalcopier"
 version = "0.13.0"
 description = "Telegram -> MT5 signal bridge with GUI (PySide6) and EA integration."
 authors = ["R4V3N"]
-license = "LicenseRef-Fluent-Signal-Copier"
+license = "CC-BY-NC-SA-4.0"
 readme = "README.md"
 # No packages section: we’re not packaging a library module
 package-mode = false
