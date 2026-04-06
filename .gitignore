@@ -260,5 +260,6 @@ desktop.ini
 # Ignore legacy/exported pip requirements (we use Poetry only)
 requirements*.txt
 
-# Ignore web_settings.json
-/web_backend/web_settings.json
+/.omc
+/.vscode
+/CLAUDE.md
