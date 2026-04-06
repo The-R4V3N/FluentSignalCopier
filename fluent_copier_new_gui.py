@@ -215,22 +215,47 @@ ALIASES = {
     "JP225": "JP225", "NIKKEI": "JP225",
     "USOIL": "XTIUSD", "WTI": "XTIUSD", "OIL": "XTIUSD", "XTIUSD": "XTIUSD",
     "BRENT": "XBRUSD", "UKOIL": "XBRUSD", "XBRUSD": "XBRUSD",
+
+    # Your broker’s dotted crypto symbols:
+    "BTCUSD": "BTCUSD", "BTC": "BTCUSD",
+    "ETHUSD": "ETHUSD", "ETH": "ETHUSD",
+    "SOLUSD": "SOLUSD", "SOL": "SOLUSD",
+    "LTCUSD": "LTCUSD", "LTC": "LTCUSD",
+    "XRPUSD": "XRPUSD", "XRP": "XRPUSD",
+    # add more as needed
 }
 
-def normalize_symbol(s: str) -> str:
-    s = (s or "").strip().upper()
-    return ALIASES.get(s, s)
+# Broker-specific forced suffix when signals omit it
+BROKER_FORCED_SUFFIX = {
+    "XAUUSD": "+",   # make bare XAUUSD become XAUUSD+
+    # add more if needed, e.g. "XAGUSD": "m"
+}
 
-# Regex patterns for parsing
-SYM_RE = re.compile(
-    r'(?:#)?\b([A-Z]{6}|[A-Z]{2,5}\d{2,3}|XAU|XAUSD|GOLD|SILVER|XAG|USOIL|WTI|OIL|XTIUSD|UKOIL|BRENT|XBRUSD|SPX500|SP500|US500|USTEC|US30|DJ30)\b',
-    re.I
+# Core symbols/aliases we understand before suffixes
+CORE_SYM = (
+    r'(?:'
+    r'[A-Z]{6}'              # EURUSD, XAUUSD, etc.
+    r'|[A-Z]{2,5}\d{2,3}'    # GER40, US500, NAS100, etc.
+    r'|XAU|XAUSD|GOLD|SILVER|XAG'
+    r'|USOIL|WTI|OIL|XTIUSD|UKOIL|BRENT|XBRUSD'
+    r'|SPX500|SP500|US500|USTEC|US30|DJ30'
+    r')'
 )
+
+# Suffix could be ".r", "-ecn", "_pro", "+", or bare trailing letters like "m"
+BROKER_SUFFIX = r'(?:[.\-_][A-Za-z0-9]{1,10}|\+|[A-Za-z]{1,7})'
+
+# Use lookarounds, not \b, so trailing '+' / '.' are kept
+SYM_TOKEN = rf'(?<!\w)({CORE_SYM}(?:{BROKER_SUFFIX})?)(?=$|\s|[^\w])'
+SYM_RE = re.compile(SYM_TOKEN, re.I)
+
+# For splitting inside normalize_symbol
+_SPLIT_SYM = re.compile(rf'^({CORE_SYM})({BROKER_SUFFIX})?$', re.I)
 
 # Accept 1) plain numbers  2) numbers with grouped thousands (space, NBSP, narrow NBSP, figure space, comma, apostrophe)
 NUM_TOKEN = r"-?\d{1,3}(?:[ \u00A0\u202F\u2007,'’]\d{3})+(?:[.,]\d+)?|-?\d+(?:[.,]\d+)?"
 
-SIDE_RE = re.compile(r'\b(BUY|SELL)\b', re.I)
+SIDE_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\b', re.I)
 ENTRY_RE = re.compile(r'^\s*(?:ENTER|ENTRY)\b.*?(' + NUM_TOKEN + r')\b', re.I)
 
 # Accepts: SL / S/L / STOPLOSS / STOP LOSS / STOPPLOSS with @, :, =, -, en/em dash
@@ -238,26 +263,33 @@ SL_RES = re.compile(
     r'(?im)\b(?:SL|S/L|STOPP?[\s\-]*LOSS)\b\s*(?:@|:|=|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
-# Accepts: TP, TP1, TP2 … with @, :, =, ->, -, en/em dash; works anywhere in the line
+# Accepts: TP, TP1, TP2 … with @, :, ;, =, ->, -, en/em dash; works anywhere in the line
 TP_RE = re.compile(
-    r'(?im)\bTP\d*\b\s*(?:@|:|=|->|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
+    r'(?im)\bTP\d*\b\s*(?:@|:|;|=|->|-|–|—)?\s*([0-9][0-9\s.,]*)\b'
 )
 
 # Order type patterns
 HEADER_PENDING_FULL_RE = re.compile(
-    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>' + NUM_TOKEN + r')\b',
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    rf'(?P<side>BUY|SELL)\s+(?P<ptype>LIMIT|STOP)\b.*?@?\s*(?P<price>{NUM_TOKEN})\b',
+    re.I | re.M
+)
+
+HEADER_LONGSHORT_ENTRY_RE = re.compile(
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    r'(?P<side>LONG|SHORT)\s+ENTRY\s*\(\s*(?P<ptype>MARKET|LIMIT|STOP)\s*\)\s*'
+    r'[:@-]?\s*(?P<price>' + NUM_TOKEN + r')\b',
     re.I | re.M
 )
 
 HEADER_INLINE_PRICE_RE = re.compile(
-    r'^\s*(?:#)?\s*(?P<sym>[A-Z]{3,6}|[A-Z]{2,5}\d{2,3})\s+'
-    r'(?P<side>BUY|SELL)\s+@?\s*(?P<price>' + NUM_TOKEN + r')\b',
+    rf'^\s*(?:#)?\s*(?P<sym>{CORE_SYM}(?:{BROKER_SUFFIX})?)\s+'
+    rf'(?P<side>BUY|SELL)\s+@?\s*(?P<price>{NUM_TOKEN})\b',
     re.I | re.M
 )
 
-NOW_MARKET_RE = re.compile(r'\b(BUY|SELL)\s+(?:NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
-PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL)\s+(LIMIT|STOP)\b', re.I)
+NOW_MARKET_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\s+(?:NOW|AT\s+MARKET|@\s*MARKET)\b', re.I)
+PENDING_PAIR_RE = re.compile(r'\b(BUY|SELL|LONG|SHORT)\s+(LIMIT|STOP)\b', re.I)
 BE_HINT_RE = re.compile(r'\bSL\s*entry\s*at\s*TP\s*1\b', re.I)
 RISK_PCT_RE = re.compile(r'\brisk\s*(\d+(?:[.,]\d+)?)\s*%?\b', re.I)
 CLOSE_ANY_RE = re.compile(
@@ -282,6 +314,33 @@ _FRACTIONAL_RISK_WORDS = {
     "third": 1/3, "⅓": 1/3,
     "two thirds": 2/3, "⅔": 2/3,
 }
+
+def apply_forced_suffix(sym: str) -> str:
+    """
+    If a symbol matches a base in BROKER_FORCED_SUFFIX and has no broker suffix,
+    append the broker's required suffix. If it already has any suffix, leave it.
+    """
+    s = (sym or "").strip().upper()
+    if not s:
+        return s
+
+    # treat these as suffix indicators
+    suffix_starters = {"+", ".", "-", "_"}
+
+    for base, suff in BROKER_FORCED_SUFFIX.items():
+        if s == base:
+            return base + suff
+        # If something like XAUUSDm or XAUUSD.cash is already there, keep it.
+        if s.startswith(base) and len(s) > len(base) and s[len(base)] in suffix_starters:
+            return s
+    return s
+
+def normalize_symbol(s: str) -> str:
+    s = (s or "").strip().upper()
+    # first map aliases (GOLD -> XAUUSD, etc.)
+    core = ALIASES.get(s, s)
+    # then force the broker suffix if the core has none
+    return apply_forced_suffix(core)
 
 def _try_sl(text: str) -> Optional[float]:
     m = SL_RES.search(text)
@@ -314,39 +373,95 @@ def _find_tp_moves(text: str) -> List[Dict[str, Any]]:
             out.append({"slot": slot, "to": to_val})
     return out
 
-def _parse_risk_percent(text: str) -> Optional[float]:
-    """Return a numeric risk value from common phrasings.
-    Interprets bare numbers as % (1 -> 1%), words like 'half risk' as multipliers (0.5)."""
+# def _parse_risk_percent(text: str) -> Optional[float]:
+#     """Return a numeric risk value from common phrasings.
+#     Interprets bare numbers as % (1 -> 1%), words like 'half risk' as multipliers (0.5)."""
+#     t = text or ""
+#     # 1) explicit %/number after 'risk'
+#     m = RISK_PCT_RE.search(t)
+#     if m:
+#         v = _num(m.group(1))
+#         if v is not None:
+#             return float(v)  # treat as percentage value
+
+#     # 2) '0.5x risk' / 'risk 0.5x'
+#     m = RISK_X_RE.search(t)
+#     if m:
+#         v = _num(m.group(1) or m.group(2))
+#         if v is not None:
+#             return float(v)  # multiplier (0.5, 2, etc.)
+
+#     # 3) worded fractions: 'half risk', 'risk half', 'quarter risk'
+#     low = t.lower()
+#     for word, val in _FRACTIONAL_RISK_WORDS.items():
+#         if re.search(fr'\b{word}\s*risk\b', low) or re.search(fr'\brisk\s*{word}\b', low):
+#             return float(val)
+
+#     # 4) simple fractions: '1/2 risk', 'risk 1/3'
+#     m = re.search(r'\b(\d+)\s*/\s*(\d+)\s*risk\b|\brisk\s*(\d+)\s*/\s*(\d+)\b', low)
+#     if m:
+#         a = _num(m.group(1) or m.group(3))
+#         b = _num(m.group(2) or m.group(4))
+#         if a and b and b != 0:
+#             return float(a / b)
+
+#     return None
+
+def _parse_risk_fields(text: str) -> dict[str, Any]:
+    """
+    Return structured risk fields:
+      - risk_percent: float | None (e.g., 1.5 means 1.5%)
+      - risk_multiplier: float | None (e.g., 0.5, 2.0)
+      - risk_label: str | None ("half", "quarter", "double", "1/3", etc.)
+    Rules:
+      - "risk 2%" or "risk 2" (ambiguous) → percent
+      - "0.5x risk" or "risk 0.5x" → multiplier
+      - "half/quarter/double/twice/third/two thirds" → multiplier + label
+      - "risk 1/3" or "1/3 risk" → multiplier + label "1/3"
+    """
     t = text or ""
+    out = {"risk_percent": None, "risk_multiplier": None, "risk_label": None}
+
     # 1) explicit %/number after 'risk'
     m = RISK_PCT_RE.search(t)
     if m:
         v = _num(m.group(1))
         if v is not None:
-            return float(v)  # treat as percentage value
+            out["risk_percent"] = float(v)
+            return out
 
     # 2) '0.5x risk' / 'risk 0.5x'
     m = RISK_X_RE.search(t)
     if m:
         v = _num(m.group(1) or m.group(2))
         if v is not None:
-            return float(v)  # multiplier (0.5, 2, etc.)
+            out["risk_multiplier"] = float(v)
+            return out
 
-    # 3) worded fractions: 'half risk', 'risk half', 'quarter risk'
+    # 3) worded fractions
     low = t.lower()
-    for word, val in _FRACTIONAL_RISK_WORDS.items():
+    WORDS = dict(_FRACTIONAL_RISK_WORDS)
+    # add a couple of common synonyms
+    WORDS.update({"double": 2.0, "twice": 2.0})
+    for word, val in WORDS.items():
         if re.search(fr'\b{word}\s*risk\b', low) or re.search(fr'\brisk\s*{word}\b', low):
-            return float(val)
+            out["risk_multiplier"] = float(val)
+            out["risk_label"] = word
+            return out
 
-    # 4) simple fractions: '1/2 risk', 'risk 1/3'
+    # 4) simple fractions like 1/3
     m = re.search(r'\b(\d+)\s*/\s*(\d+)\s*risk\b|\brisk\s*(\d+)\s*/\s*(\d+)\b', low)
     if m:
         a = _num(m.group(1) or m.group(3))
         b = _num(m.group(2) or m.group(4))
         if a and b and b != 0:
-            return float(a / b)
+            val = float(a / b)
+            out["risk_multiplier"] = val
+            out["risk_label"] = f"{int(a)}/{int(b)}"
+            return out
 
-    return None
+    # 5) No match
+    return out
 
 def parse_message(text: str) -> Optional[Dict[str, Any]]:
     """Parse a message into a signal dictionary."""
@@ -409,15 +524,26 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         ptype = m.group('ptype').upper()
         order_type = "LIMIT" if ptype == "LIMIT" else "STOP"
     else:
-        m2 = HEADER_INLINE_PRICE_RE.search(t)
-        if m2:
-            symbol = normalize_symbol(m2.group('sym'))
-            side = m2.group('side').upper()
-            entry = _num(m2.group('price'))
-
+        # New: "BTCUSD Long Entry (market|limit|stop): 116474"
+        mL = HEADER_LONGSHORT_ENTRY_RE.search(t)
+        if mL:
+            symbol = normalize_symbol(mL.group('sym'))
+            side = mL.group('side').upper()          # LONG/SHORT here
+            entry = _num(mL.group('price'))
+            ptype = (mL.group('ptype') or "").upper()
+            order_type = ("LIMIT" if ptype == "LIMIT"
+                          else "STOP" if ptype == "STOP"
+                          else "MARKET")
+        else:
+            m2 = HEADER_INLINE_PRICE_RE.search(t)
+            if m2:
+                symbol = normalize_symbol(m2.group('sym'))
+                side = m2.group('side').upper()
+                entry = _num(m2.group('price'))
+    
         # Check for order type overrides
-        if PENDING_PAIR_RE.search(t):
-            pm = PENDING_PAIR_RE.search(t)
+        pm = PENDING_PAIR_RE.search(t)
+        if pm and order_type == "MARKET":
             pside, ptyp = pm.group(1).upper(), pm.group(2).upper()
             side = side or pside
             order_type = "LIMIT" if ptyp == "LIMIT" else "STOP"
@@ -450,7 +576,12 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
         return None
 
     # Risk parsing
-    risk = _parse_risk_percent(t)
+    # risk = _parse_risk_percent(t) legacy code
+    _risk = _parse_risk_fields(t)
+
+    # Normalize LONG/SHORT to BUY/SELL for downstream logic
+    if side in ("LONG", "SHORT"):
+        side = "BUY" if side == "LONG" else "SELL"
 
     # For MARKET orders, entry is reference only
     entry_ref = entry
@@ -468,7 +599,10 @@ def parse_message(text: str) -> Optional[Dict[str, Any]]:
     "tps": tps,
     "tp": (tps[0] if tps else None),   # ← add this line
     "be_on_tp": be_on_tp,
-    "risk": risk,
+   # "risk": risk, legacy code
+    "risk_percent": _risk.get("risk_percent"),
+    "risk_multiplier": _risk.get("risk_multiplier"),
+    "risk_label": _risk.get("risk_label"),
 }
 
 # =====================================================================
@@ -831,8 +965,8 @@ class CopierThread(QThread):
         mt5_dir = self._choose_mt5_files()
         mt5_dir.mkdir(parents=True, exist_ok=True)
         self.signal_file = mt5_dir / "Fluent_signals.jsonl"
-        self.counter_file = mt5_dir / "signal_counter.txt"
-        self.heartbeat_file = mt5_dir / "fluent_heartbeat.txt"
+        self.counter_file = mt5_dir / "Fluent_signal_counter.txt"
+        self.heartbeat_file = mt5_dir / "Fluent_heartbeat.txt"
         self._load_counter()
 
         self.logLine.emit(f"[INFO] MT5 Files: {mt5_dir}")
@@ -1084,13 +1218,25 @@ class CopierThread(QThread):
                             "tp": tp_first,
                             "tps": tps_list,
                             "tps_csv": tps_csv,
-                            "risk_percent": (1.0 if p.get("risk") is None else p["risk"]),
                             "lots": None,
                             "be_on_tp": int(p.get("be_on_tp") or 0),
+                            # risk fields will be injected conditionally below
                             "gid": str(gid),
                             "original_event_id": str(event.id),
                             "confidence": conf,
                         }
+                        # Inject risk only if explicitly parsed
+                        rp = p.get("risk_percent")
+                        rm = p.get("risk_multiplier")
+                        rl = p.get("risk_label")
+
+                        if rp is not None:
+                            rec["risk_percent"] = float(rp)
+                        if rm is not None:
+                            rec["risk_multiplier"] = float(rm)
+                        if rl:
+                            rec["risk_label"] = str(rl)
+
                         await self._write_signal(rec)
                         self.last_open_oid[(source_key, sym)] = msg_id
                         self.logLine.emit(
@@ -1485,13 +1631,18 @@ class DashboardPage(QWidget):
                 parts.append(", ".join(f"TP{i}: {v}" for i, v in enumerate(tps, 1)))
             details = " | ".join(parts)
 
-            risk = signal_data.get('risk_percent')
-            if risk is not None:
-                # cosmetic: show as “Risk: 0.5x” for multipliers, or “Risk: 50%” for percents
-                if risk <= 3:  # heuristic: treat small numbers as multipliers
-                    parts.append(f"Risk: {risk}x")
+            rp = signal_data.get('risk_percent')
+            rm = signal_data.get('risk_multiplier')
+            rl = signal_data.get('risk_label')
+
+            if rp is not None:
+                parts.append(f"Risk: {rp}%")
+            elif rm is not None:
+                # Pretty-print known labels when available
+                if rl:
+                    parts.append(f"Risk: {rl} ({rm}x)")
                 else:
-                    parts.append(f"Risk: {risk}%")
+                    parts.append(f"Risk: {rm}x")
 
         elif action == "CLOSE":
             entry_price = "Market Close"
@@ -2220,6 +2371,36 @@ class MainWindow(QWidget):
             self.dashboard.authEdit.clear()
         except Exception:
             pass
+
+      # --- Auth actions from Dashboard ---------------------------------
+    def _submitAuth(self):
+        """Called by DashboardPage when the user hits Submit in the auth box."""
+        try:
+            if not self.thread:
+                self.toast("Not running", "Start first.")
+                return
+
+            text = (self.dashboard.authEdit.text() or "").strip()
+            if not text:
+                self.toast("Missing", "Enter the code or password.")
+                return
+
+            mode = getattr(self, "_authMode", "code")
+            if mode == "code":
+                self.thread.set_auth_code(text)
+                self._appendLog("[AUTH] Code submitted")
+            else:
+                self.thread.set_auth_password(text)
+                self._appendLog("[AUTH] Password submitted")
+
+            self._hideAuthBox()
+        except Exception as e:
+            self._appendLog(f"[ERROR] auth submit: {e}")
+
+    def _cancelAuth(self):
+        """Hide the auth box without submitting anything."""
+        self._appendLog("[AUTH] Input canceled")
+        self._hideAuthBox()
         
     def closeEvent(self, event):
         try:

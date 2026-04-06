@@ -1,335 +1,143 @@
+<div align="center">
+
 # FluentSignalCopier
 
-## Production-ready Telegram → MetaTrader 5 signal bridge
+**A production-ready Telegram → MetaTrader 5 signal bridge with advanced risk management.**
 
-![Version](https://img.shields.io/badge/version-v0.13.0--beta-orange) ![Status](https://img.shields.io/badge/status-production--ready-green) ![Security Policy](https://img.shields.io/badge/security-policy-blue)
+[![Version](https://img.shields.io/badge/version-v0.13.0--beta-orange)](https://github.com/The-R4V3N/FluentSignalCopier/releases)
+[![Status](https://img.shields.io/badge/status-production--ready-green)](https://github.com/The-R4V3N/FluentSignalCopier)
+[![License](https://img.shields.io/badge/license-custom-blue)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2F3.12-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![last commit](https://img.shields.io/github/last-commit/The-R4V3N/FluentSignalCopier)](https://github.com/The-R4V3N/FluentSignalCopier/commits/dev)
 
-**Turn any Telegram trading channel into automated MT5 trades**  
-✅ Parse messy human signals  ✅ Smart risk management  ✅ Multi-platform monitoring
+Turn any Telegram trading channel into automated MT5 trades — hands-free.
 
----
+[How It Works](#how-it-works) · [Quick Start](#quick-start) · [Features](#features) · [Troubleshooting](#troubleshooting)
 
-## 📖 Table of Contents
-
-📈 [Track Record](#-proven-track-record)
-
-🎯 [Choose Your Path](#-choose-your-path)  
-
-🚀 [Quick Start](#-quick-start)
-
-🖥️ [Interfaces](#%EF%B8%8F-interfaces)
-
-📊 [Latest Features](#-latest-features)
-
-🛠️ [Troubleshooting](#%EF%B8%8F-troubleshooting)
-
-👨‍💻 [Development](#-development)
-
-❓ [FAQ](#-frequently-asked-questions)
+</div>
 
 ---
 
-## 🎬 See It In Action
+## How It Works
 
-**Input:** Telegram message
+```mermaid
+graph TD
+    TG[Telegram Channels] -->|Telethon| BRIDGE[Python Bridge Parser]
+    BRIDGE -->|JSONL files| MT5[MT5 Expert Advisor MQL5]
+    MT5 -->|Trades| BROKER[Broker]
+    BRIDGE -->|Logs & Heartbeat| GUI[PySide6 Desktop GUI]
+```
 
-```yml
+**Input** — A Telegram signal message:
+
+```
 XAUUSD BUY Limit
 Entry: 1985.50
 Stoploss: 1980
-TP: 1990 
-TP: 1995 
+TP: 1990
+TP: 1995
 TP: 2000
 ```
 
-**Output:** Automatic MT5 order with risk management  
-**Result:** Hands-free trading from any Telegram signal provider  
-
-Low-latency execution (tested under 200ms in local setups)
+**Output** — Automatic MT5 order with risk management, placed in under 200ms.
 
 ---
 
-## 📈 Proven Track Record
+## Quick Start
 
-- **Benchmarked at 500+ signals daily** across 20+ channels in real-world usage
-- **Parsing accuracy measured ~99%** on diverse live signals
-- **Low-latency execution** from Telegram to MT5 (sub-200ms in local tests)
-- **Redundant monitoring** to minimize missed signals
-- **Observed uptime >99.9%** during extended test runs with auto-recovery
+**1. Clone the repo**
 
----
+```bash
+git clone https://github.com/The-R4V3N/FluentSignalCopier.git
+cd FluentSignalCopier
+```
 
-## 🎯 Choose Your Path
+**2. Install dependencies**
 
-**👶 New to automated trading?** → [Quick Start Guide](#-quick-start)
+```bash
+pipx install poetry   # if not already installed
+poetry install --no-root
+```
 
-**🔧 Need custom configuration?** → [Features](#-features)  
+**3. Configure**
 
-**💼 Enterprise deployment?** → [Architecture](#%EF%B8%8F-architecture)
+Copy `.env.example` to `.env` and fill in:
 
----
+| Variable | Description |
+| -------- | ----------- |
+| `TELEGRAM_API_ID` | From [my.telegram.org](https://my.telegram.org) |
+| `TELEGRAM_API_HASH` | From [my.telegram.org](https://my.telegram.org) |
+| `TELEGRAM_PHONE` | Your phone number |
+| `WATCH_CHATS` | Channel IDs or usernames to monitor |
+| `MT5_FILES_DIR` | Path to your MT5 `Files` directory |
 
-## 🚀 Quick Start
+**4. Run**
 
-1. **Clone the repository**:
+```bash
+# Desktop GUI (recommended)
+poetry run python fluent_copier_new_gui.py
 
-   ```bash
-   git clone https://github.com/The-R4V3N/FluentSignalCopier.git
-   cd FluentSignalCopier
-   ```
+# Headless bridge only
+poetry run python telegram_bridge.py
+```
 
-2. **Install dependencies**:
+**5. Attach the MT5 EA**
 
-   ```bash
-    pipx install poetry   # if not already installed
-    poetry install --no-root
-   ```
-
-3. **Configure Telegram & MT5**
-
-- Rename .env.example to .env
-- Add your Telegram API ID, hash, and phone number
-- Set the correct MT5_FILES_DIR path. Can also be set later in the GUI Settings. Which has auto selection for common paths
-
-4. **Choose your interface**
-
-- **Web Dashboard**:
-
-    ```bash
-    poetry run uvicorn backend.app:app --reload
-    cd web_backend && npm install && npm run dev
-   ```
-
-- Open [http://localhost:5173](http://localhost:5173) in your browser
-
-- **Desktop GUI (recommended)**:
-
-    ```bash
-    poetry run python fluent_copier_new_gui.py
-    ```
-
-- **Headless bridge only**:
-
-    ```bash
-    poetry run python telegram_bridge.py
-    ```
-
-5. **Attach the MT5 EA**
-
-- Copy FluentSignalCopier.mq5 into MQL5/Experts/
+- Copy `FluentSignalCopier.mq5` into `MQL5/Experts/`
 - Compile in MetaEditor
 - Attach to a chart with AutoTrading enabled
 
-- ✅ You’re ready to receive and copy signals into MT5!
-
 ---
 
-## 🎯 Why This Project?
-
-- **Cross-platform monitoring**: Web UI (React + FastAPI) or Windows GUI (PySide6 + QFluentWidgets)
-- **Robust parser**: Handles messy, human-written signals (e.g., "BUY LIMIT 3347", "SL @ 3341", comma/dot decimals, emojis)
-- **Smart order types**: Distinguishes between pending orders (`BUY LIMIT`, `BUY STOP`) vs market orders
-- **Multi-TP management**: Splits positions for multiple take-profit levels
-- **Risk-aware**: Lot caps, % risk, dollar caps, and per-instrument safety
-- **Selective closing**: Close-by-OID ensures only related trades are closed, preserving swing trades
-- **Broker compatibility**: Symbol mapping (aliases like `US30 → DJ30`) and prefix/suffix support
-- **Monitoring & Alerts**: GUI + dashboard log streaming, heartbeat health checks, CRITICAL alerts
-- **GUI and CLI**: User-friendly interface for configuration and monitoring, plus command-line option for automation
-
----
-
-## 🆚 Why FluentSignalCopier?
-
-| Feature | FluentSignalCopier | Manual Copy-Paste | Other Tools |
-|---------|-------------------|-------------------|-------------|
-| **Speed** | ⚡ Sub-200ms (tested locally) | 🐌 30+ seconds | ⚙️ 5-10 seconds |
-| **Accuracy** | 🎯 ~99% | 📉 Human error prone | 📊 80-90% |
-| **Risk Control** | 🛡️ Advanced multi-layer | ❌ Manual only | ⚠️ Basic |
-| **Signal Formats** | 📝 Most common messy formats | 🤷 Manual interpretation | 📋 Limited templates |
-| **Monitoring** | 📊 Real-time + analytics | 👀 Manual watching | 📈 Basic logs |
-| **Multi-Platform** | 🌐 Web + Desktop + Mobile | 💻 Desktop only | 🖥️ Single interface |
-
----
-
-## 🖥️ Interfaces
-
-### 🌐 Web Dashboard
-
-![Web Dashboard](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/Web_dashboard.png)
-
-**Professional web interface featuring:**
-
-- Real-time WebSocket signal feed
-- Channel performance analytics (win rate, confidence scoring)
-- Responsive design with mobile support
-- Theme customization (light/dark modes)
-- Clear history & channel filtering
-
-### 🖱️ Desktop GUI - Modern Dashboard
+## Desktop GUI
 
 ![FluentSignalCopier GUI Home](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home.png)
-![FluentSignalCopier GUI Home with Logs](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home_with_log.png)
+![FluentSignalCopier GUI with Logs](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_home_with_log.png)
 
-**Modern desktop interface with:**
+The modern PySide6 + QFluentWidgets interface includes:
 
 - Signal quality slider (confidence filter)
 - Real-time log viewer with color-coded severities
 - Emergency Close All button
 - Chat picker with auto-complete
+- Telegram API configuration and MT5 auto-detection
+- Risk management parameter controls
 
-### ⚙️ Settings Interface
-
-![FluentSignalCopier GUI Settings](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_settings.png)
-
-**Comprehensive settings panel:**
-
-- Telegram API configuration
-- MT5 directory auto-detection
-- Risk management parameters
-- Alert and monitoring preferences
-
-### 🖥️ Classic Desktop GUI
-
-![FluentSignalCopier GUI](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/image.png)
-
-**Classic interface option:**
-
-- Clean, intuitive layout
-- Real-time signal monitoring
-- Integrated log streaming
-- One-click emergency controls
+![FluentSignalCopier Settings](https://github.com/The-R4V3N/FluentSignalCopier/blob/master/new_gui_settings.png)
 
 ---
 
-## 🛠️ Troubleshooting
+## Features
 
-| Issue      | Solution                                                                 |
-|------------|--------------------------------------------------------------------------|
-| No file/folder found for package fluentsignalcopier | Use poetry install --no-root in script mode |
-| Poetry picks Python 3.13 | Force Python 3.11 with poetry env use <path-to-python311.exe> |
-| PySide6 install fails | You’re likely on Python 3.13+ — downgrade to 3.11/3.12 |
-| No trades placed | Check MT5 EA is attached, AutoTrading enabled, and symbols match |
-| Symbol not found | Ensure the symbol is available in MT5 and matches the Telegram signal. Also add to Market Watch, check prefix/suffix |
-| Multiple opens for one message | Enable deduplication in the GUI settings |
-| Wrong trades closed | Verify close-by-OID is enabled in the GUI settings |
+| Category | What it does |
+| -------- | ------------ |
+| **Signal Parsing** | Handles messy, human-written signals — emojis, comma/dot decimals, mixed formats |
+| **Order Types** | Distinguishes market orders from pending orders (`BUY LIMIT`, `BUY STOP`) |
+| **Multi-TP** | Splits positions across multiple take-profit levels |
+| **Break-Even** | Automatically moves SL to entry when TP1 is hit |
+| **Risk Management** | Lot caps, % risk, dollar caps, per-instrument safety |
+| **Selective Close** | Close-by-OID closes only related trades, preserving swing positions |
+| **Broker Compatibility** | Symbol mapping (`US30 → DJ30`), prefix/suffix support |
+| **Monitoring** | Real-time log streaming, heartbeat health checks, CRITICAL alerts |
 
----
+### Signal Format Examples
 
-## 👨‍💻 Development
-
-### Branch Protection & Workflow
-
-This repository uses a protected master branch workflow to ensure code quality:
-
-### Branch Structure
-
-- master → Protected release branch (stable code only)
-- dev → Main development branch (latest working code)
-- feature/* → Feature development branches
-
-### Development Workflow
-
-1. Clone and setup development environment:
-
-   ```bash
-   git clone https://github.com/The-R4V3N/FluentSignalCopier.git
-   cd FluentSignalCopier
-   ./scripts/install-hooks.sh  # Install pre-push protection
-   ```
-
-2. Create a new feature branch from dev:
-
-   ```bash
-   git checkout dev
-   git pull origin dev
-   git checkout -b feature/your-feature-name
-   ```
-
-3. Development and testing:
-
-   ```bash
-   # Make your changes
-   git add .
-   git commit -m "feat: your feature description"
-   git push origin feature/your-feature-name
-   ```
-
-4. Open a Pull Request (PR) to merge your feature branch into dev.
-
-- Create PR from feature/your-feature-name → dev
-- After review and testing, merge to dev
-- For releases: Create PR from dev → master
-
-### Protection Features
-
-- ✅ GitHub Actions prevent direct pushes to master
-- ✅ Local pre-push hooks block accidental pushes
-- ✅ dev branch set as default for new clones
-- ✅ Automated branch protection via CI/CD
-
-### Setting Up Local Protection
-
-1. Install pre-push hooks:
-
-   ```bash
-   # Install the pre-push hook (prevents direct master pushes)
-    chmod +x scripts/install-hooks.sh
-    ./scripts/install-hooks.sh
-   ```
-
-This ensures that all changes go through proper review and the master branch remains stable for production releases.
-
-## ❓ Frequently Asked Questions
-
-### What is FluentSignalCopier?
-
-FluentSignalCopier is a tool designed to automate the copying of trading signals from various sources to MetaTrader 5 (MT5) with high accuracy and low latency.
-
-### How does it work?
-
-It uses Telethon to read messages from Telegram, a Python backend to parse and validate them, and an MT5 Expert Advisor to execute the trades.
-
-### What platforms does it support?
-
-- Windows: fully supported
-- Linux: possible with Wine [https://www.winehq.org/](https://www.winehq.org/)
-- Web Dashboard: cross-platform (works in any browser)
-
-## ⚡ Performance & Reliability
-
-- **Low-latency execution:** Sub-200ms in local benchmarks
-- **High availability:** Observed >99.9% uptime in production tests
-- **Memory efficient:** Typically <50MB RAM usage under standard workloads
-- **Failsafe mechanisms:** Duplicate detection, connection monitoring
-- **Scalable:** Verified handling of 100+ concurrent channels in testing
-- **Robust parsing:** Handles messy signal formats reliably
-- **Zero-config:** Auto-detects MT5 installation and broker settings
-
----
-
-## 📝 Real Signal Examples
-
-The system understands multiple signal formats:
-
-**Market Orders:**
-
-```yml
+**Market order:**
+```
 XAUUSD Buy Now
 SL 3341
 TP 3362
 ```
 
-**Pending Orders:**
-
-```yml
+**Pending order:**
+```
 #XAUUSD BUY LIMIT 3347
 STOPLOSS @ 3320
 TP @ 3357
 ```
 
-**Risk Controls:**
-
-```yml
+**Risk controls:**
+```
 XAUUSD Buy
 RISK 2%
 HALF RISK
@@ -337,60 +145,78 @@ HALF RISK
 
 ---
 
-## 🏗️ Architecture
+## Performance
 
-```mermaid
-graph TD
-    TG[Telegram Channels] --> |Telethon| BRIDGE[Python Bridge Parser]
-    BRIDGE --> |JSONL files| MT5["MT5 EA MQL5"]
-    MT5 --> |Trades| BROKER[Broker]
-    BRIDGE --> |Logs/Heartbeat| GUI[PySide6 GUI]
-    BRIDGE --> |Signals/Logs| API[FastAPI Backend]
-    API --> WEB[React Frontend Dashboard]
-    API --> MON[Terminal Monitor]
+- **~99% parsing accuracy** on diverse live signal formats
+- **Sub-200ms latency** from Telegram to MT5 (local benchmarks)
+- **500+ signals/day** capacity tested across 20+ channels
+- **>99.9% uptime** observed during extended production runs
+- **<50MB RAM** under standard workloads
+- **100+ concurrent channels** verified in testing
+
+---
+
+## Security
+
+- **Telegram transport**: Encrypted MTProto API via Telethon
+- **MT5 bridge**: Local file I/O via `MQL5/Files` — no network exposure
+- **Input validation**: Applied to all signal parsing
+- **Audit logging**: Every trade decision is logged with timestamp
+
+---
+
+## Troubleshooting
+
+| Issue | Solution |
+| ----- | -------- |
+| `poetry: command not found` | Add `%APPDATA%\Python\Scripts` to your PATH |
+| Poetry picks Python 3.13 | Run `poetry env use <path-to-python311.exe>` |
+| PySide6 install fails | Python 3.13+ is not supported — use 3.11 or 3.12 |
+| No trades placed | Check EA is attached, AutoTrading is enabled, symbols match |
+| Symbol not found | Add symbol to Market Watch, check prefix/suffix settings |
+| Multiple opens for one message | Enable deduplication in GUI settings |
+| Wrong trades closed | Enable close-by-OID in GUI settings |
+
+---
+
+## Development
+
+### Branch Structure
+
+- `master` — protected release branch
+- `dev` — main development branch
+- `feature/*` — feature branches, PR into `dev`
+
+Direct pushes to `master` are blocked. All changes go through PRs.
+
+### Setup
+
+```bash
+git clone https://github.com/The-R4V3N/FluentSignalCopier.git
+cd FluentSignalCopier
+./scripts/install-hooks.sh   # installs pre-push protection
+poetry install --no-root
+poetry run pytest            # run tests
 ```
 
----
-
-## 🆕 Latest Features
-
-- React web frontend with WebSocket feed, analytics, and theming
-- FastAPI backend with metrics, auto-detection, and health monitoring
-- Terminal monitoring dashboard with uptime/error counters
-- Centralized structured logging with rotation and real-time streaming
+Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/) — enforced via `commitlint`.
 
 ---
 
-## 📊 Features
+## Disclaimer
 
-### Feature Matrix
-
-| Feature Category | Basic | Advanced | Enterprise |
-|------------------|-------|----------|------------|
-| **Signal Parsing** | ✅ Standard formats | ✅ Heuristic confidence scoring | ✅ Planned ML/Custom training |
-| **Risk Management** | ✅ % based | ✅ Multi-layer + per-symbol | ✅ Portfolio-level optimization |
-| **Interfaces** | ✅ Desktop GUI | ✅ Web Dashboard + Mobile | ✅ API + Custom integrations |
-| **Monitoring** | ✅ Basic logs | ✅ Real-time analytics | ✅ Advanced reporting + alerts |
-| **Channels** | ✅ Up to 5 | ✅ Unlimited | ✅ Unlimited + performance ranking |
+This software does **not** constitute financial advice. Trading involves risk. Always test on a demo account first and never risk more than you can afford to lose.
 
 ---
 
-## 🔐 Security
+## License
 
-- **Telegram transport**: Encrypted MTProto API  
-- **MT5 bridge**: Local file I/O via `MQL5/Files` (secure remote shares if used)  
-- **Input validation**: On all parsing to prevent injection  
-- **Audit logging**: Every trading decision is logged
+Licensed under the [Fluent Signal Copier License](LICENSE).
 
 ---
 
-## 📄 Disclaimer
+<div align="center">
 
-The Software does **not** constitute financial advice. Trading involves risk.  
-Always test on demo accounts first and never risk more than you can afford to lose.
+*built for traders, by a trader*
 
----
-
-## 📜 License
-
-Licensed under the [MIT License](LICENSE).
+</div>
