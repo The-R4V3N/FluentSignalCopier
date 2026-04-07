@@ -4,11 +4,11 @@
 
 **A production-ready Telegram → MetaTrader 5 signal bridge with advanced risk management.**
 
-[![Version](https://img.shields.io/badge/version-v0.13.0--beta-orange)](https://github.com/The-R4V3N/FluentSignalCopier/releases)
+[![Version](https://img.shields.io/badge/version-v1.0.0-orange)](https://github.com/The-R4V3N/FluentSignalCopier/releases)
 [![Status](https://img.shields.io/badge/status-production--ready-green)](https://github.com/The-R4V3N/FluentSignalCopier)
 [![License](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2F3.12-3776ab?logo=python&logoColor=white)](https://www.python.org/)
-[![last commit](https://img.shields.io/github/last-commit/The-R4V3N/FluentSignalCopier)](https://github.com/The-R4V3N/FluentSignalCopier/commits/dev)
+[![last commit](https://img.shields.io/github/last-commit/The-R4V3N/FluentSignalCopier)](https://github.com/The-R4V3N/FluentSignalCopier/commits/master)
 
 Turn any Telegram trading channel into automated MT5 trades — hands-free.
 
@@ -83,8 +83,8 @@ poetry run python telegram_bridge.py
 
 **5. Attach the MT5 EA**
 
-- Copy `FluentSignalCopier.mq5` into `MQL5/Experts/`
-- Compile in MetaEditor
+- Get the EA from [MQL5 Market](https://www.mql5.com/en/users/r4v3n)
+- Copy `FluentSignalCopier.ex5` into `MQL5/Experts/`
 - Attach to a chart with AutoTrading enabled
 
 ---
@@ -183,7 +183,7 @@ HALF RISK
 
 - `master` — main branch, direct pushes blocked by local pre-push hook
 
-All changes go through PRs. Branch protection will be enforced once the repo is public.
+All changes go through PRs. Branch protection is enforced on `master`.
 
 ### Setup
 
