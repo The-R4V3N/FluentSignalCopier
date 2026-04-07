@@ -9,7 +9,7 @@
 #  --collect-all qfluentwidgets `
 #  .\fluent_copier_new_gui.py
 
-# Licensed under the Fluent Signal Copier Limited Use License v1.0
+# Licensed under the Attribution-NonCommercial-ShareAlike 4.0 International
 # See LICENSE.txt for terms. No warranty; use at your own risk.
 # Copyright (c) 2025 R4V3N. All rights reserved.
 
@@ -1917,6 +1917,18 @@ class HistoryPage(QWidget):
                 total = int(row.get("signals_total") or 0)
                 known = wins + losses
                 win_rate = (wins / known * 100.0) if known else None
+
+                # Populate self.stats so _refresh_summary can display Win % correctly
+                # after filter changes or live events trigger a table rebuild.
+                st = self.stats.setdefault(ch, {
+                    "opens": 0, "closes": 0, "mods": 0,
+                    "win": 0, "loss": 0, "draw": 0,
+                    "conf_sum": 0.0, "conf_n": 0,
+                    "last_ts": 0,
+                })
+                st["win"] = wins
+                st["loss"] = losses
+                st["opens"] = total
 
                 r = self.summaryTable.rowCount()
                 self.summaryTable.insertRow(r)
