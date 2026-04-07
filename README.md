@@ -181,11 +181,9 @@ HALF RISK
 
 ### Branch Structure
 
-- `master` — protected release branch
-- `dev` — main development branch
-- `feature/*` — feature branches, PR into `dev`
+- `master` — main branch, direct pushes blocked by local pre-push hook
 
-Direct pushes to `master` are blocked. All changes go through PRs.
+All changes go through PRs. Branch protection will be enforced once the repo is public.
 
 ### Setup
 
@@ -209,7 +207,7 @@ This software does **not** constitute financial advice. Trading involves risk. A
 
 ## License
 
-Licensed under the [Fluent Signal Copier License](LICENSE).
+Licensed under the [CC BY-NC-SA 4.0](LICENSE).
 
 ---
 
