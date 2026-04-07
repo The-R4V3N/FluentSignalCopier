@@ -1,5 +1,10 @@
 # Minimal imghdr shim for Python 3.13+
 # Supports the common formats Telethon may touch.
+
+# Licensed under the Attribution-NonCommercial-ShareAlike 4.0 International
+# See LICENSE.txt for terms. No warranty; use at your own risk.
+# Copyright (c) 2025 R4V3N. All rights reserved.
+
 def what(file, h=None):
     if h is None:
         with open(file, "rb") as f:
