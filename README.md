@@ -6,7 +6,7 @@
 
 [![Version](https://img.shields.io/badge/version-v0.13.0--beta-orange)](https://github.com/The-R4V3N/FluentSignalCopier/releases)
 [![Status](https://img.shields.io/badge/status-production--ready-green)](https://github.com/The-R4V3N/FluentSignalCopier)
-[![License](https://img.shields.io/badge/license-custom-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-CC%20BY--NC--SA%204.0-blue)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2F3.12-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![last commit](https://img.shields.io/github/last-commit/The-R4V3N/FluentSignalCopier)](https://github.com/The-R4V3N/FluentSignalCopier/commits/dev)
 
