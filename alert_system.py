@@ -1,5 +1,9 @@
 # alert_system.py - Alert system for critical events in FluentSignalCopier
 
+# Licensed under the Attribution-NonCommercial-ShareAlike 4.0 International
+# See LICENSE.txt for terms. No warranty; use at your own risk.
+# Copyright (c) 2025 R4V3N. All rights reserved.
+
 import json
 import time
 import smtplib
