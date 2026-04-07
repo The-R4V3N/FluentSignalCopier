@@ -174,8 +174,6 @@ HALF RISK
 | PySide6 install fails | Python 3.13+ is not supported — use 3.11 or 3.12 |
 | No trades placed | Check EA is attached, AutoTrading is enabled, symbols match |
 | Symbol not found | Add symbol to Market Watch, check prefix/suffix settings |
-| Multiple opens for one message | Enable deduplication in GUI settings |
-| Wrong trades closed | Enable close-by-OID in GUI settings |
 
 ---
 
