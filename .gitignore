@@ -263,3 +263,5 @@ requirements*.txt
 /.omc
 /.vscode
 /CLAUDE.md
+
+/MQL5/
