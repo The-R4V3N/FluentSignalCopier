@@ -38,6 +38,12 @@ Changelog — 0.13.0
 
 ### Fixed
 
+- EA: CLOSE record timestamp now uses `TimeGMT()` instead of `TimeCurrent()`.
+  `TimeCurrent()` returns broker server time (UTC+2/+3), which caused the
+  dashboard to display signal times offset by the broker's timezone (~2–3 hours
+  ahead). `TimeGMT()` returns true UTC, matching the Python bridge's
+  `time.localtime()` conversion. No bridge update required. ([#37](https://github.com/The-R4V3N/FluentSignalCopier/issues/37))
+
 - Parser (bridge):
   - Safer SL/TP regex: captures full decimals, avoids placeholders (`TP1 / TP2` with no number).
   - SL hyphen sanitization (`SL-95.34` no longer parsed as negative).
