@@ -30,7 +30,8 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     LineEdit, PushButton, PrimaryPushButton, TextEdit, SubtitleLabel, BodyLabel,
-    CaptionLabel, InfoBar, InfoBarPosition, FluentIcon, setTheme, Theme, InfoBadge
+    CaptionLabel, InfoBar, InfoBarPosition, FluentIcon, setTheme, Theme, InfoBadge,
+    ComboBox
 )
 
 from telethon import TelegramClient, events
@@ -1862,7 +1863,7 @@ class HistoryPage(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        # --- Channel selector (filter) ---
+        # --- Channel selector (filter) + period selector ---
         row = QHBoxLayout()
         row.addWidget(SubtitleLabel("Trading History"))
         row.addStretch(1)
@@ -1870,7 +1871,20 @@ class HistoryPage(QWidget):
         self.channelFilter = LineEdit(self)
         self.channelFilter.setPlaceholderText("Type to filter (leave empty for all)")
         row.addWidget(self.channelFilter, 0)
+        row.addWidget(BodyLabel("Period:"))
+        self.periodCombo = ComboBox(self)
+        self.periodCombo.addItems(["All Time", "30 Days", "7 Days", "Today"])
+        self.periodCombo.setCurrentIndex(0)
+        row.addWidget(self.periodCombo)
         root.addLayout(row)
+
+        # --- PnL total label ---
+        pnl_row = QHBoxLayout()
+        pnl_row.addWidget(BodyLabel("Total P&L:"))
+        self.pnlLabel = BodyLabel("$0.00")
+        pnl_row.addWidget(self.pnlLabel)
+        pnl_row.addStretch(1)
+        root.addLayout(pnl_row)
 
         # --- Channel performance table ---
         root.addWidget(SubtitleLabel("Channel Performance"))
@@ -1900,17 +1914,42 @@ class HistoryPage(QWidget):
         self.refreshBtn = PushButton("Refresh from DB", self)
         row.addWidget(self.refreshBtn)
 
-        # wire filter
+        # wire filter and period selector
         self.channelFilter.textChanged.connect(self._refresh_tables)
+        self.periodCombo.currentIndexChanged.connect(self._on_period_changed)
 
     # ---------- public API ----------
+    def _since_ms_for_period(self) -> int | None:
+        """Convert current period combo selection to a UTC epoch ms cutoff."""
+        text = self.periodCombo.currentText()
+        if text == "All Time":
+            return None
+        now = int(time.time() * 1000)
+        if text == "Today":
+            t = time.localtime()
+            midnight = time.mktime(time.struct_time(
+                (t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, t.tm_isdst)
+            ))
+            return int(midnight * 1000)
+        elif text == "7 Days":
+            return now - 7 * 86400 * 1000
+        elif text == "30 Days":
+            return now - 30 * 86400 * 1000
+        return None
+
+    def _on_period_changed(self):
+        if hasattr(self, "_current_store") and self._current_store is not None:
+            self.hydrate_from_store(self._current_store)
+
     def hydrate_from_store(self, store: HistoryStore, limit: int = 600):
         """Fill Channel Performance + Recent Signals from the persistent DB."""
+        self._current_store = store
+        since_ms = self._since_ms_for_period()
         try:
-            # 1) Channel performance
+            # 1) Channel performance (period-filtered)
             self.stats.clear()
             self.summaryTable.setRowCount(0)
-            for row in store.channel_stats():
+            for row in store.channel_stats_since(since_ms):
                 ch = row.get("channel") or ""
                 wins = int(row.get("wins") or 0)
                 losses = int(row.get("losses") or 0)
@@ -1943,6 +1982,10 @@ class HistoryPage(QWidget):
                 ]
                 for c, v in enumerate(vals):
                     self.summaryTable.setItem(r, c, QTableWidgetItem(v))
+
+            # Update PnL total label
+            pnl = store.total_pnl(since_ms)
+            self.pnlLabel.setText(f"${pnl:,.2f}")
 
             # 2) Recent signals
             self.historyTable.setRowCount(0)

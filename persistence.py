@@ -156,6 +156,40 @@ class HistoryStore:
         return [dict(channel=ch, signals_total=tot, wins=w, losses=l, avg_pnl=avg, total_pnl=totp)
                 for ch, tot, w, l, avg, totp in self._conn.execute("SELECT channel,signals_total,wins,losses,avg_pnl,total_pnl FROM v_channel_stats")]
 
+    def total_pnl(self, since_ms: int | None = None) -> float:
+        if since_ms is not None:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl), 0.0) FROM results WHERE closed_ts_ms >= ?",
+                (since_ms,)
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl), 0.0) FROM results"
+            ).fetchone()
+        return float(row[0])
+
+    def channel_stats_since(self, since_ms: int | None = None) -> list[dict]:
+        if since_ms is not None:
+            q = """
+                SELECT s.channel,
+                       COUNT(*) AS signals_total,
+                       SUM(CASE WHEN r.outcome='WIN' THEN 1 ELSE 0 END) AS wins,
+                       SUM(CASE WHEN r.outcome='LOSS' THEN 1 ELSE 0 END) AS losses,
+                       AVG(r.realized_pnl) AS avg_pnl,
+                       SUM(r.realized_pnl) AS total_pnl
+                FROM signals s
+                JOIN results r ON r.signal_id = s.id
+                WHERE r.closed_ts_ms >= ?
+                GROUP BY s.channel
+            """
+            rows = self._conn.execute(q, (since_ms,)).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT channel, signals_total, wins, losses, avg_pnl, total_pnl FROM v_channel_stats"
+            ).fetchall()
+        return [dict(channel=r[0], signals_total=r[1], wins=r[2] or 0, losses=r[3] or 0,
+                     avg_pnl=r[4], total_pnl=r[5]) for r in rows]
+
     def history_for_channel(self, channel: str, limit=500):
         q = """SELECT s.id, s.ts_ms, s.symbol, s.side, s.sl, s.entry, s.tps_json, s.status,
                       r.realized_pnl, r.outcome
