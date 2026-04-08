@@ -83,7 +83,7 @@ poetry run python telegram_bridge.py
 
 **5. Attach the MT5 EA**
 
-- Get the EA from [MQL5 Market](https://www.mql5.com/en/users/r4v3n)
+- Get the EA from [MQL5 Market](https://www.mql5.com/en/market/product/172263?source=Site+Profile+Seller#!tab=overview)
 - Copy `FluentSignalCopier.ex5` into `MQL5/Experts/`
 - Attach to a chart with AutoTrading enabled
 
